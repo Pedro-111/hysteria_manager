@@ -6,44 +6,58 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# URL del script
-SCRIPT_URL="https://raw.githubusercontent.com/Pedro-111/hysteria_manager/develop/hysteria_manager.sh"
+# Función para ejecutar comandos como root
+run_as_root() {
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@"
+    else
+        sudo "$@"
+    fi
+}
 
-# Directorio de instalación
-INSTALL_DIR="/usr/local/bin"
-
-# Nombre del script
+# Definir variables
+INSTALL_DIR="$HOME/.local/bin"
 SCRIPT_NAME="hysteria_manager"
+GITHUB_RAW_URL="https://raw.githubusercontent.com/Pedro-111/hysteria_manager/develop"
 
-echo -e "${YELLOW}Instalando Hysteria Manager...${NC}"
+# Función para instalar dependencias
+install_dependencies() {
+    run_as_root apt-get update
+    run_as_root apt-get install -y curl wget
+}
 
-# Verificar si se está ejecutando como root
-if [ "$EUID" -ne 0 ]; then 
-    echo -e "${RED}Este script debe ejecutarse como root${NC}"
-    exit 1
-fi
+# Instalar dependencias
+install_dependencies
+
+# Crear el directorio de instalación si no existe
+mkdir -p "$INSTALL_DIR"
 
 # Descargar el script
-if curl -sL "$SCRIPT_URL" -o "$INSTALL_DIR/$SCRIPT_NAME"; then
-    echo -e "${GREEN}Script descargado exitosamente${NC}"
-else
-    echo -e "${RED}Error al descargar el script${NC}"
-    exit 1
-fi
+echo "Descargando $SCRIPT_NAME..."
+curl -sSL "$GITHUB_RAW_URL/${SCRIPT_NAME}.sh" -o "$INSTALL_DIR/$SCRIPT_NAME"
 
 # Hacer el script ejecutable
 chmod +x "$INSTALL_DIR/$SCRIPT_NAME"
 
-# Crear un enlace simbólico para fácil acceso
-ln -sf "$INSTALL_DIR/$SCRIPT_NAME" /usr/bin/$SCRIPT_NAME
+# Agregar el directorio al PATH si no está ya
+if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
+    echo "export PATH=\"\$PATH:$INSTALL_DIR\"" >> "$HOME/.bashrc"
+    echo "Se ha añadido $INSTALL_DIR a su PATH."
+fi
 
-echo -e "${GREEN}Instalación completada${NC}"
-echo -e "Puedes ejecutar Hysteria Manager con el comando: ${YELLOW}$SCRIPT_NAME${NC}"
+# Crear un alias
+echo "alias hysteria-manager='$INSTALL_DIR/$SCRIPT_NAME'" >> "$HOME/.bashrc"
+
+# Aplicar los cambios inmediatamente
+source "$HOME/.bashrc"
+
+echo -e "${GREEN}Instalación completada. El comando 'hysteria-manager' está ahora disponible.${NC}"
+echo -e "Puede ejecutar ${YELLOW}'hysteria-manager'${NC} en cualquier momento para gestionar Hysteria."
 
 # Preguntar si desea ejecutar el script ahora
 read -p "¿Deseas ejecutar Hysteria Manager ahora? (s/n): " run_now
 if [[ $run_now == "s" || $run_now == "S" ]]; then
-    $SCRIPT_NAME
+    $INSTALL_DIR/$SCRIPT_NAME
 else
-    echo -e "Puedes ejecutar Hysteria Manager más tarde con el comando: ${YELLOW}$SCRIPT_NAME${NC}"
+    echo -e "Puedes ejecutar Hysteria Manager más tarde con el comando: ${YELLOW}hysteria-manager${NC}"
 fi
