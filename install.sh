@@ -39,12 +39,6 @@ curl -sSL "$GITHUB_RAW_URL/${SCRIPT_NAME}.sh" -o "$INSTALL_DIR/$SCRIPT_NAME"
 # Hacer el script ejecutable
 chmod +x "$INSTALL_DIR/$SCRIPT_NAME"
 
-# Agregar el directorio al PATH si no está ya
-if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
-    echo "export PATH=\"\$PATH:$INSTALL_DIR\"" >> "$HOME/.bashrc"
-    echo "Se ha añadido $INSTALL_DIR a su PATH."
-fi
-
 # Crear un alias
 echo "alias hysteria-manager='$INSTALL_DIR/$SCRIPT_NAME'" >> "$HOME/.bashrc"
 
