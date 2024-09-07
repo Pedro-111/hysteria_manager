@@ -20,7 +20,7 @@ install_hysteria() {
     apt install -y curl wget unzip openssl
 
     # Descargar e instalar Hysteria
-    wget https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64
+    wget https://github.com/Pedro-111/hysteria_manager/raw/develop/hysteria-linux-amd64
     chmod +x hysteria-linux-amd64
     mv hysteria-linux-amd64 /usr/local/bin/hysteria
 
