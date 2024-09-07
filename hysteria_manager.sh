@@ -138,15 +138,16 @@ change_passwords() {
     read -p "Nueva contraseña de autenticación (dejar en blanco para generar aleatoriamente): " NEW_AUTH_PASSWORD
     NEW_AUTH_PASSWORD=${NEW_AUTH_PASSWORD:-$(generate_password)}
 
-    # Actualizar el archivo de configuración
-    sed -i "s/\"password\": \"$OBFS_PASSWORD\"/\"password\": \"$NEW_OBFS_PASSWORD\"/" /etc/hysteria/config.json
-    sed -i "s/\"password\": \"$AUTH_PASSWORD\"/\"password\": \"$NEW_AUTH_PASSWORD\"/" /etc/hysteria/config.json
+    # Actualizar el archivo de configuración usando un delimitador diferente
+    sed -i "s|\"password\": \"$OBFS_PASSWORD\"|\"password\": \"$NEW_OBFS_PASSWORD\"|" /etc/hysteria/config.json
+    sed -i "s|\"password\": \"$AUTH_PASSWORD\"|\"password\": \"$NEW_AUTH_PASSWORD\"|" /etc/hysteria/config.json
 
     systemctl restart hysteria
 
     echo -e "${GREEN}Contraseñas actualizadas exitosamente.${NC}"
     show_config
 }
+
 
 # Función para desinstalar Hysteria
 uninstall_hysteria() {
