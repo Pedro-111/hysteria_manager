@@ -53,11 +53,3 @@ source "$HOME/.bashrc"
 
 echo -e "${GREEN}Instalación completada. El comando 'hysteria-manager' está ahora disponible.${NC}"
 echo -e "Puede ejecutar ${YELLOW}'hysteria-manager'${NC} en cualquier momento para gestionar Hysteria."
-
-# Preguntar si desea ejecutar el script ahora
-read -p "¿Deseas ejecutar Hysteria Manager ahora? (s/n): " run_now
-if [[ $run_now == "s" || $run_now == "S" ]]; then
-    $INSTALL_DIR/$SCRIPT_NAME
-else
-    echo -e "Puedes ejecutar Hysteria Manager más tarde con el comando: ${YELLOW}hysteria-manager${NC}"
-fi
