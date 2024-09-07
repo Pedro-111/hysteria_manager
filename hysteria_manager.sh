@@ -109,7 +109,7 @@ show_config() {
     if [ ! -f "/etc/hysteria/config.json" ]; then
         echo -e "${RED}Hysteria no está instalado o configurado.${NC}"
         return
-    }
+    fi
 
     PUBLIC_IP=$(curl -s https://api.ipify.org)
     PRIVATE_IP=$(hostname -I | awk '{print $1}')
