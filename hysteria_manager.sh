@@ -109,7 +109,7 @@ show_config() {
     if [ ! -f "/etc/hysteria/config.json" ]; then
         echo -e "${RED}Hysteria no está instalado o configurado.${NC}"
         return
-    fi
+    }
 
     PUBLIC_IP=$(curl -s https://api.ipify.org)
     PRIVATE_IP=$(hostname -I | awk '{print $1}')
@@ -117,14 +117,24 @@ show_config() {
     OBFS_PASSWORD=$(grep -oP '"password": "\K[^"]+' /etc/hysteria/config.json | head -1)
     AUTH_PASSWORD=$(grep -oP '"password": "\K[^"]+' /etc/hysteria/config.json | tail -1)
 
+    # Obtener velocidades si están configuradas
+    UPLOAD_SPEED=$(grep -oP '"up": \K[0-9]+' /etc/hysteria/config.json || echo "No configurado")
+    DOWNLOAD_SPEED=$(grep -oP '"down": \K[0-9]+' /etc/hysteria/config.json || echo "No configurado")
+
     echo -e "${YELLOW}Configuración de Hysteria:${NC}"
     echo "IP pública: $PUBLIC_IP"
     echo "IP privada: $PRIVATE_IP"
     echo "Puerto: $PORT"
     echo "Contraseña de ofuscación: $OBFS_PASSWORD"
     echo "Contraseña de autenticación: $AUTH_PASSWORD"
-}
+    echo "Velocidad de subida: $UPLOAD_SPEED Mbps"
+    echo "Velocidad de bajada: $DOWNLOAD_SPEED Mbps"
 
+    # Generar cadena de importación de NekoBox
+    NEKOBOX_IMPORT="hy2://${AUTH_PASSWORD}@${PUBLIC_IP}:${PORT}/?insecure=1&obfs=salamander&obfs-password=${OBFS_PASSWORD}#Hysteria_Server"
+    echo -e "\nCadena de importación de NekoBox:"
+    echo "$NEKOBOX_IMPORT"
+}
 # Función para cambiar contraseñas
 change_passwords() {
     if [ ! -f "/etc/hysteria/config.json" ]; then
