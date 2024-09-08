@@ -104,6 +104,26 @@ WantedBy=multi-user.target
 EOF
 }
 
+configure_speeds() {
+    read -p "Velocidad de subida (Mbps, dejar en blanco para no limitar): " UPLOAD_SPEED
+    read -p "Velocidad de bajada (Mbps, dejar en blanco para no limitar): " DOWNLOAD_SPEED
+
+    if [ -n "$UPLOAD_SPEED" ] || [ -n "$DOWNLOAD_SPEED" ]; then
+        # Añadir o actualizar configuración de velocidad
+        jq --arg up "$UPLOAD_SPEED" --arg down "$DOWNLOAD_SPEED" \
+           '.up = (if $up == "" then null else ($up | tonumber) end) | 
+            .down = (if $down == "" then null else ($down | tonumber) end)' \
+           /etc/hysteria/config.json > /etc/hysteria/config.json.tmp && 
+        mv /etc/hysteria/config.json.tmp /etc/hysteria/config.json
+
+        systemctl restart hysteria
+        echo -e "${GREEN}Configuración de velocidad actualizada.${NC}"
+    else
+        echo -e "${YELLOW}No se realizaron cambios en la configuración de velocidad.${NC}"
+    fi
+
+    show_config
+}
 # Función para mostrar la configuración
 show_config() {
     if [ ! -f "/etc/hysteria/config.json" ]; then
@@ -189,6 +209,7 @@ while true; do
     echo "2. Ver configuración de Hysteria"
     echo "3. Cambiar contraseñas"
     echo "4. Desinstalar Hysteria"
+    echo "5. Configurar velocidades"
     echo "5. Salir"
     read -p "Seleccione una opción: " choice
 
@@ -206,6 +227,9 @@ while true; do
             uninstall_hysteria
             ;;
         5)
+            configure_speeds
+            ;;
+        6)
             echo "Saliendo..."
             exit 0
             ;;
