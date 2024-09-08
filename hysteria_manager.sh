@@ -210,7 +210,7 @@ while true; do
     echo "3. Cambiar contraseñas"
     echo "4. Desinstalar Hysteria"
     echo "5. Configurar velocidades"
-    echo "5. Salir"
+    echo "6. Salir"
     read -p "Seleccione una opción: " choice
 
     case $choice in
