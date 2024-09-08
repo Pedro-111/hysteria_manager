@@ -131,9 +131,13 @@ show_config() {
     echo "Velocidad de bajada: $DOWNLOAD_SPEED Mbps"
 
     # Generar cadena de importación de NekoBox
-    NEKOBOX_IMPORT="hy2://${AUTH_PASSWORD}@${PUBLIC_IP}:${PORT}/?insecure=1&obfs=salamander&obfs-password=${OBFS_PASSWORD}#Hysteria_Server"
-    echo -e "\nCadena de importación de NekoBox:"
-    echo "$NEKOBOX_IMPORT"
+    NEKOBOX_IMPORT_PUBLIC="hy2://${AUTH_PASSWORD}@${PUBLIC_IP}:${PORT}/?insecure=1&obfs=salamander&obfs-password=${OBFS_PASSWORD}#Hysteria_Server"
+    echo -e "\nCadena de importación de NekoBox (IP PUBLICA):"
+    echo "$NEKOBOX_IMPORT_PUBLIC"
+
+    NEKOBOX_IMPORT_PRIVATE="hy2://${AUTH_PASSWORD}@${PRIVATE_IP}:${PORT}/?insecure=1&obfs=salamander&obfs-password=${OBFS_PASSWORD}#Hysteria_Server"
+    echo -e "\nCadena de importación de NekoBox (IP PRIVADA):"
+    echo "$NEKOBOX_IMPORT_PRIVATE"
 }
 # Función para cambiar contraseñas
 change_passwords() {
