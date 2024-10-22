@@ -1,218 +1,102 @@
-#!/bin/bash
 
-# Colores
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+    # Mostrar estado del servicio
+    echo -e "\n${BLUE}Estado del servicio:${NC}"
+    systemctl status hysteria --no-pager | grep -E "Active:|Status:"
 
-# Función para generar una contraseña aleatoria
-generate_password() {
-    openssl rand -base64 12
+    # Mostrar estadísticas de conexión
+    echo -e "\n${BLUE}Estadísticas de conexión:${NC}"
+    monitor_resources
 }
 
-# Función para instalar y configurar Hysteria
-install_hysteria() {
-    echo -e "${YELLOW}Verificando instalación de Hysteria...${NC}"
-    
-    if [ -f "/usr/local/bin/hysteria" ]; then
-        echo -e "${GREEN}Hysteria ya está instalado.${NC}"
-    else
-        echo -e "${YELLOW}Instalando Hysteria...${NC}"
-        
-        # Actualizar el sistema e instalar dependencias
-        apt update && apt upgrade -y
-        apt install -y curl wget unzip openssl
-
-        # Descargar e instalar Hysteria
-        wget https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64
-        chmod +x hysteria-linux-amd64
-        mv hysteria-linux-amd64 /usr/local/bin/hysteria
-    fi
-
-    if [ ! -d "/etc/hysteria" ]; then
-        # Crear directorio de configuración
-        mkdir -p /etc/hysteria
-
-        # Generar certificado autofirmado
-        openssl req -x509 -nodes -newkey rsa:4096 -keyout /etc/hysteria/server.key -out /etc/hysteria/server.crt -days 365 -subj "/CN=hysteria.server"
-
-        # Solicitar puerto
-        read -p "Ingrese el puerto para Hysteria (default: 36712): " PORT
-        PORT=${PORT:-36712}
-
-        # Generar contraseñas aleatorias
-        OBFS_PASSWORD=$(generate_password)
-        AUTH_PASSWORD=$(generate_password)
-
-        # Crear archivo de configuración
-        create_config
-    else
-        echo -e "${GREEN}Configuración de Hysteria ya existe.${NC}"
-    fi
-
-    # Crear servicio systemd si no existe
-    if [ ! -f "/etc/systemd/system/hysteria.service" ]; then
-        create_systemd_service
-    fi
-
-    # Habilitar e iniciar el servicio
-    systemctl enable hysteria
-    systemctl start hysteria
-
-    echo -e "${GREEN}Hysteria instalado y configurado exitosamente.${NC}"
-    show_config
-}
-
-# Función para crear el archivo de configuración
-create_config() {
-    cat > /etc/hysteria/config.json <<EOF
-{
-  "listen": ":$PORT",
-  "tls": {
-    "cert": "/etc/hysteria/server.crt",
-    "key": "/etc/hysteria/server.key"
-  },
-  "obfs": {
-    "type": "salamander",
-    "salamander": {
-      "password": "$OBFS_PASSWORD"
-    }
-  },
-  "auth": {
-    "type": "password",
-    "password": "$AUTH_PASSWORD"
-  }
-}
-EOF
-}
-
-# Función para crear el servicio systemd
-create_systemd_service() {
-    cat > /etc/systemd/system/hysteria.service <<EOF
-[Unit]
-Description=Hysteria VPN Server
-After=network.target
-
-[Service]
-ExecStart=/usr/local/bin/hysteria server -c /etc/hysteria/config.json
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-EOF
-}
-
-configure_speeds() {
-    read -p "Velocidad de subida (Mbps, dejar en blanco para no limitar): " UPLOAD_SPEED
-    read -p "Velocidad de bajada (Mbps, dejar en blanco para no limitar): " DOWNLOAD_SPEED
-
-    if [ -n "$UPLOAD_SPEED" ] || [ -n "$DOWNLOAD_SPEED" ]; then
-        # Añadir o actualizar configuración de velocidad
-        jq --arg up "$UPLOAD_SPEED" --arg down "$DOWNLOAD_SPEED" \
-           '.up = (if $up == "" then null else ($up | tonumber) end) | 
-            .down = (if $down == "" then null else ($down | tonumber) end)' \
-           /etc/hysteria/config.json > /etc/hysteria/config.json.tmp && 
-        mv /etc/hysteria/config.json.tmp /etc/hysteria/config.json
-
-        systemctl restart hysteria
-        echo -e "${GREEN}Configuración de velocidad actualizada.${NC}"
-    else
-        echo -e "${YELLOW}No se realizaron cambios en la configuración de velocidad.${NC}"
-    fi
-
-    show_config
-}
-# Función para mostrar la configuración
-show_config() {
-    if [ ! -f "/etc/hysteria/config.json" ]; then
-        echo -e "${RED}Hysteria no está instalado o configurado.${NC}"
-        return
-    fi
-
-    PUBLIC_IP=$(curl -s https://api.ipify.org)
-    PRIVATE_IP=$(hostname -I | awk '{print $1}')
-    PORT=$(grep -oP '"listen": ":\K[0-9]+' /etc/hysteria/config.json)
-    OBFS_PASSWORD=$(grep -oP '"password": "\K[^"]+' /etc/hysteria/config.json | head -1)
-    AUTH_PASSWORD=$(grep -oP '"password": "\K[^"]+' /etc/hysteria/config.json | tail -1)
-
-    # Obtener velocidades si están configuradas
-    UPLOAD_SPEED=$(grep -oP '"up": \K[0-9]+' /etc/hysteria/config.json || echo "No configurado")
-    DOWNLOAD_SPEED=$(grep -oP '"down": \K[0-9]+' /etc/hysteria/config.json || echo "No configurado")
-
-    echo -e "${YELLOW}Configuración de Hysteria:${NC}"
-    echo "IP pública: $PUBLIC_IP"
-    echo "IP privada: $PRIVATE_IP"
-    echo "Puerto: $PORT"
-    echo "Contraseña de ofuscación: $OBFS_PASSWORD"
-    echo "Contraseña de autenticación: $AUTH_PASSWORD"
-    echo "Velocidad de subida: $UPLOAD_SPEED Mbps"
-    echo "Velocidad de bajada: $DOWNLOAD_SPEED Mbps"
-
-    # Generar cadena de importación de NekoBox
-    NEKOBOX_IMPORT_PUBLIC="hy2://${AUTH_PASSWORD}@${PUBLIC_IP}:${PORT}/?insecure=1&obfs=salamander&obfs-password=${OBFS_PASSWORD}#Hysteria_Server"
-    echo -e "\nCadena de importación de NekoBox (IP PUBLICA):"
-    echo "$NEKOBOX_IMPORT_PUBLIC"
-
-    NEKOBOX_IMPORT_PRIVATE="hy2://${AUTH_PASSWORD}@${PRIVATE_IP}:${PORT}/?insecure=1&obfs=salamander&obfs-password=${OBFS_PASSWORD}#Hysteria_Server"
-    echo -e "\nCadena de importación de NekoBox (IP PRIVADA):"
-    echo "$NEKOBOX_IMPORT_PRIVATE"
-}
-# Función para cambiar contraseñas
+# Función mejorada para cambiar contraseñas
 change_passwords() {
-    if [ ! -f "/etc/hysteria/config.json" ]; then
+    if [ ! -f "$CONFIG_FILE" ]; then
         echo -e "${RED}Hysteria no está instalado o configurado.${NC}"
         return
-    fi
+    }
+
+    backup_config
 
     read -p "Nueva contraseña de ofuscación (dejar en blanco para generar aleatoriamente): " NEW_OBFS_PASSWORD
     NEW_OBFS_PASSWORD=${NEW_OBFS_PASSWORD:-$(generate_password)}
-
     read -p "Nueva contraseña de autenticación (dejar en blanco para generar aleatoriamente): " NEW_AUTH_PASSWORD
     NEW_AUTH_PASSWORD=${NEW_AUTH_PASSWORD:-$(generate_password)}
 
-    # Actualizar el archivo de configuración usando un delimitador diferente
-    sed -i "s|\"password\": \"$OBFS_PASSWORD\"|\"password\": \"$NEW_OBFS_PASSWORD\"|" /etc/hysteria/config.json
-    sed -i "s|\"password\": \"$AUTH_PASSWORD\"|\"password\": \"$NEW_AUTH_PASSWORD\"|" /etc/hysteria/config.json
+    # Usar jq para actualizar el archivo de configuración
+    local temp_config
+    temp_config=$(mktemp)
+    jq --arg obfs "$NEW_OBFS_PASSWORD" --arg auth "$NEW_AUTH_PASSWORD" \
+        '.obfs.password = $obfs | .auth.password = $auth' "$CONFIG_FILE" > "$temp_config"
+    mv "$temp_config" "$CONFIG_FILE"
 
     systemctl restart hysteria
-
     echo -e "${GREEN}Contraseñas actualizadas exitosamente.${NC}"
+    log_message "Contraseñas actualizadas"
     show_config
 }
 
-
-# Función para desinstalar Hysteria
+# Función mejorada para desinstalar
 uninstall_hysteria() {
-    echo -e "${YELLOW}Desinstalando Hysteria...${NC}"
-    
-    # Detener y deshabilitar el servicio
+    echo -e "${YELLOW}¿Está seguro de que desea desinstalar Hysteria? (s/n)${NC}"
+    read -r confirm
+    if [ "$confirm" != "s" ]; then
+        return
+    fi
+
+    echo -e "${YELLOW}¿Desea guardar una copia de la configuración? (s/n)${NC}"
+    read -r backup
+    if [ "$backup" = "s" ]; then
+        backup_config
+    fi
+
     systemctl stop hysteria
     systemctl disable hysteria
 
-    # Eliminar archivos
     rm -f /usr/local/bin/hysteria
     rm -rf /etc/hysteria
     rm -f /etc/systemd/system/hysteria.service
 
-    # Recargar systemd
-    systemctl daemon-reload
+    # Limpiar reglas de firewall
+    if command -v ufw &> /dev/null; then
+        ufw delete allow "$PORT"/udp
+    elif command -v firewall-cmd &> /dev/null; then
+        firewall-cmd --permanent --remove-port="$PORT"/udp
+        firewall-cmd --reload
+    fi
 
+    systemctl daemon-reload
     echo -e "${GREEN}Hysteria ha sido desinstalado.${NC}"
+    log_message "Hysteria desinstalado"
 }
 
-# Menú principal
-while true; do
-    echo -e "\n${YELLOW}Menú de Hysteria${NC}"
-    echo "1. Instalar y configurar Hysteria"
-    echo "2. Ver configuración de Hysteria"
-    echo "3. Cambiar contraseñas"
-    echo "4. Desinstalar Hysteria"
-    echo "5. Configurar velocidades"
-    echo "6. Salir"
-    read -p "Seleccione una opción: " choice
+# Función para mostrar logs
+show_logs() {
+    if [ -f "$LOG_FILE" ]; then
+        echo -e "${YELLOW}Últimas entradas del log:${NC}"
+        tail -n 50 "$LOG_FILE"
+    else
+        echo -e "${RED}No se encontró el archivo de log.${NC}"
+    fi
+}
 
+# Menú principal mejorado
+show_menu() {
+    echo -e "\n${YELLOW}=== Menú de Hysteria ===${NC}"
+    echo -e "${BLUE}1.${NC} Instalar y configurar Hysteria"
+    echo -e "${BLUE}2.${NC} Ver configuración de Hysteria"
+    echo -e "${BLUE}3.${NC} Cambiar contraseñas"
+    echo -e "${BLUE}4.${NC} Desinstalar Hysteria"
+    echo -e "${BLUE}5.${NC} Mostrar logs"
+    echo -e "${BLUE}6.${NC} Monitorear recursos"
+    echo -e "${BLUE}7.${NC} Respaldar configuración"
+    echo -e "${BLUE}8.${NC} Salir"
+    echo -e "${YELLOW}===================${NC}"
+}
+
+# Bucle principal
+while true; do
+    show_menu
+    read -p "Seleccione una opción: " choice
     case $choice in
         1)
             install_hysteria
@@ -227,14 +111,24 @@ while true; do
             uninstall_hysteria
             ;;
         5)
-            configure_speeds
+            show_logs
             ;;
         6)
-            echo "Saliendo..."
+            monitor_resources
+            ;;
+        7)
+            backup_config
+            echo -e "${GREEN}Configuración respaldada exitosamente.${NC}"
+            ;;
+        8)
+            echo -e "${GREEN}Saliendo...${NC}"
             exit 0
             ;;
         *)
             echo -e "${RED}Opción inválida. Por favor, intente de nuevo.${NC}"
             ;;
     esac
+
+    echo -e "\nPresione Enter para continuar..."
+    read -r
 done
