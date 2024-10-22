@@ -204,37 +204,116 @@ EOF
     show_config
 }
 
-# Función mejorada para mostrar configuración
+# Función para verificar e instalar jq
+check_jq() {
+    if ! command -v jq >/dev/null 2>&1; then
+        echo -e "${YELLOW}jq no está instalado. Instalando...${NC}"
+        apt-get update >/dev/null 2>&1
+        apt-get install -y jq >/dev/null 2>&1
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}jq instalado exitosamente.${NC}"
+        else
+            echo -e "${RED}Error al instalar jq. Por favor, instálelo manualmente.${NC}"
+            exit 1
+        fi
+    fi
+}
+
+# Función para obtener valores del config sin jq (fallback)
+get_config_value() {
+    local file="$1"
+    local key="$2"
+    grep -o "\"$key\":[^,}]*" "$file" | cut -d':' -f2 | tr -d '" ' || echo ""
+}
+
+# Función para mostrar configuración
 show_config() {
     if [ ! -f "$CONFIG_FILE" ]; then
         echo -e "${RED}Hysteria no está instalado o configurado.${NC}"
         return
     }
-
-    echo -e "${YELLOW}Configuración de Hysteria:${NC}"
-    echo "IP pública: $PUBLIC_IP"
-    echo "IP privada: $PRIVATE_IP"
-    echo "Puerto: $PORT"
-    echo "Contraseña de ofuscación: $OBFS_PASSWORD"
-    echo "Contraseña de autenticación: $AUTH_PASSWORD"
-    echo "Velocidad de subida: $UPLOAD_SPEED Mbps"
-    echo "Velocidad de bajada: $DOWNLOAD_SPEED Mbps"
-
-    # Generar cadenas de importación para diferentes clientes
-    NEKOBOX_IMPORT="hy2://${AUTH_PASSWORD}@${PUBLIC_IP}:${PORT}/?insecure=1&obfs=salamander&obfs-password=${OBFS_PASSWORD}#Hysteria_Server"
-    CLASH_IMPORT="- name: Hysteria_Server\n  type: hysteria\n  server: ${PUBLIC_IP}\n  port: ${PORT}\n  auth-str: ${AUTH_PASSWORD}\n  obfs: salamander\n  obfs-password: ${OBFS_PASSWORD}\n  up: ${UPLOAD_SPEED}\n  down: ${DOWNLOAD_SPEED}"
-
-    echo -e "\n${BLUE}Cadenas de importación:${NC}"
-    echo -e "${YELLOW}NekoBox:${NC}\n$NEKOBOX_IMPORT"
-    echo -e "\n${YELLOW}Clash:${NC}\n$CLASH_IMPORT"
-
+    
+    # Verificar e instalar jq si es necesario
+    check_jq
+    
+    echo -e "${YELLOW}Obteniendo configuración...${NC}"
+    
+    # Intentar obtener valores usando jq, si falla usar método alternativo
+    if command -v jq >/dev/null 2>&1; then
+        local port=$(jq -r '.listen' "$CONFIG_FILE" 2>/dev/null | grep -oP '\d+' || echo "Error")
+        local upload_mbps=$(jq -r '.up_mbps' "$CONFIG_FILE" 2>/dev/null || echo "Error")
+        local download_mbps=$(jq -r '.down_mbps' "$CONFIG_FILE" 2>/dev/null || echo "Error")
+        local obfs_password=$(jq -r '.obfs.password' "$CONFIG_FILE" 2>/dev/null || echo "Error")
+        local auth_password=$(jq -r '.auth.password' "$CONFIG_FILE" 2>/dev/null || echo "Error")
+    else
+        # Método alternativo sin jq
+        local port=$(grep -o '"listen":"[^"]*"' "$CONFIG_FILE" | cut -d'"' -f4 | grep -oP '\d+' || echo "Error")
+        local upload_mbps=$(get_config_value "$CONFIG_FILE" "up_mbps")
+        local download_mbps=$(get_config_value "$CONFIG_FILE" "down_mbps")
+        local obfs_password=$(grep -o '"password":"[^"]*"' "$CONFIG_FILE" | head -1 | cut -d'"' -f4 || echo "Error")
+        local auth_password=$(grep -o '"password":"[^"]*"' "$CONFIG_FILE" | tail -1 | cut -d'"' -f4 || echo "Error")
+    fi
+    
+    # Obtener IPs
+    echo -e "${YELLOW}Obteniendo IPs...${NC}"
+    local public_ip
+    local private_ip
+    
+    # Intentar múltiples métodos para obtener IP pública
+    public_ip=$(curl -s https://api.ipify.org 2>/dev/null || 
+                wget -qO- https://api.ipify.org 2>/dev/null || 
+                curl -s https://ipinfo.io/ip 2>/dev/null || 
+                curl -s https://icanhazip.com 2>/dev/null || 
+                echo "No disponible")
+    
+    # Obtener IP privada
+    private_ip=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1' | head -n 1 || 
+                 hostname -I | awk '{print $1}' || 
+                 echo "No disponible")
+    
+    # Mostrar la configuración
+    echo -e "\n${YELLOW}Configuración de Hysteria:${NC}"
+    echo -e "${BLUE}IP pública:${NC} $public_ip"
+    echo -e "${BLUE}IP privada:${NC} $private_ip"
+    echo -e "${BLUE}Puerto:${NC} $port"
+    echo -e "${BLUE}Contraseña de ofuscación:${NC} $obfs_password"
+    echo -e "${BLUE}Contraseña de autenticación:${NC} $auth_password"
+    echo -e "${BLUE}Velocidad de subida:${NC} $upload_mbps Mbps"
+    echo -e "${BLUE}Velocidad de bajada:${NC} $download_mbps Mbps"
+    
+    # Generar y mostrar cadenas de importación solo si tenemos todos los valores necesarios
+    if [ "$port" != "Error" ] && [ "$public_ip" != "No disponible" ] && 
+       [ "$auth_password" != "Error" ] && [ "$obfs_password" != "Error" ]; then
+        
+        local nekobox_import="hy2://${auth_password}@${public_ip}:${port}/?insecure=1&obfs=salamander&obfs-password=${obfs_password}#Hysteria_Server"
+        local clash_import="- name: Hysteria_Server\n  type: hysteria\n  server: ${public_ip}\n  port: ${port}\n  auth-str: ${auth_password}\n  obfs: salamander\n  obfs-password: ${obfs_password}\n  up: ${upload_mbps}\n  down: ${download_mbps}"
+        
+        echo -e "\n${BLUE}Cadenas de importación:${NC}"
+        echo -e "${YELLOW}NekoBox:${NC}\n$nekobox_import"
+        echo -e "\n${YELLOW}Clash:${NC}\n$clash_import"
+    else
+        echo -e "\n${RED}No se pudieron generar las cadenas de importación debido a valores faltantes.${NC}"
+    fi
+    
     # Mostrar estado del servicio
     echo -e "\n${BLUE}Estado del servicio:${NC}"
-    systemctl status hysteria --no-pager | grep -E "Active:|Status:"
-
+    if systemctl status hysteria >/dev/null 2>&1; then
+        systemctl status hysteria --no-pager | grep -E "Active:|Status:"
+    else
+        echo -e "${RED}Servicio no encontrado${NC}"
+    fi
+    
     # Mostrar estadísticas de conexión
     echo -e "\n${BLUE}Estadísticas de conexión:${NC}"
-    monitor_resources
+    if command -v netstat >/dev/null 2>&1; then
+        local connections=$(netstat -an | grep ":$port" | grep ESTABLISHED | wc -l)
+        echo "Conexiones activas: $connections"
+    elif command -v ss >/dev/null 2>&1; then
+        local connections=$(ss -an | grep ":$port" | grep ESTAB | wc -l)
+        echo "Conexiones activas: $connections"
+    else
+        echo -e "${RED}No se pueden obtener estadísticas de conexión (netstat/ss no disponible)${NC}"
+    fi
 }
 
 change_passwords() {
