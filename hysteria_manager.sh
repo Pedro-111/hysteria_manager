@@ -320,7 +320,7 @@ change_passwords() {
     if [ ! -f "$CONFIG_FILE" ]; then
         echo -e "${RED}Hysteria no está instalado o configurado.${NC}"
         return
-    }
+    fi
 
     backup_config
 
