@@ -266,8 +266,71 @@ show_config() {
         echo -e "${RED}No se pueden obtener estadísticas de conexión (netstat/ss no disponible)${NC}"
     fi
 }
-# Nueva función para monitorear usuarios
+# Función para verificar y instalar dependencias del monitor
+check_monitor_dependencies() {
+    echo -e "${YELLOW}Verificando dependencias del monitor...${NC}"
+    local deps=("ss" "lsof" "top")
+    local missing=()
+    local packages=()
+
+    # Verificar ss
+    if ! command -v ss >/dev/null 2>&1; then
+        missing+=("ss")
+        packages+=("iproute2")
+    fi
+
+    # Verificar lsof
+    if ! command -v lsof >/dev/null 2>&1; then
+        missing+=("lsof")
+        packages+=("lsof")
+    fi
+
+    # Verificar top
+    if ! command -v top >/dev/null 2>&1; then
+        missing+=("top")
+        packages+=("procps")
+    fi
+
+    # Si faltan dependencias, intentar instalarlas
+    if [ ${#missing[@]} -ne 0 ]; then
+        echo -e "${YELLOW}Faltan las siguientes herramientas: ${missing[*]}${NC}"
+        echo -e "${BLUE}Intentando instalar dependencias...${NC}"
+        
+        if command -v apt-get >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y "${packages[@]}"
+        elif command -v yum >/dev/null 2>&1; then
+            yum install -y "${packages[@]}"
+        else
+            echo -e "${RED}No se pudo determinar el gestor de paquetes. Por favor, instale manualmente: ${packages[*]}${NC}"
+            return 1
+        fi
+        
+        # Verificar si la instalación fue exitosa
+        local failed=()
+        for dep in "${missing[@]}"; do
+            if ! command -v "$dep" >/dev/null 2>&1; then
+                failed+=("$dep")
+            fi
+        done
+        
+        if [ ${#failed[@]} -ne 0 ]; then
+            echo -e "${RED}No se pudieron instalar todas las dependencias. Faltantes: ${failed[*]}${NC}"
+            return 1
+        fi
+    fi
+    
+    echo -e "${GREEN}Todas las dependencias están instaladas.${NC}"
+    return 0
+}
+
 monitor_users() {
+    # Verificar dependencias primero
+    if ! check_monitor_dependencies; then
+        echo -e "${RED}No se puede iniciar el monitor sin las dependencias necesarias.${NC}"
+        return 1
+    }
+
     echo -e "${YELLOW}=== Monitor de Usuarios de Hysteria ===${NC}"
     
     # Obtener el puerto del archivo de configuración
@@ -299,34 +362,58 @@ monitor_users() {
 
         # Obtener y mostrar conexiones
         echo -e "\n${BLUE}Conexiones activas:${NC}"
-        if command -v netstat >/dev/null 2>&1; then
-            echo "╔════════════════════╦═══════════════╦════════════╗"
-            echo "║ IP Remota          ║ Puerto Remoto ║ Estado     ║"
-            echo "╠════════════════════╬═══════════════╬════════════╣"
-            netstat -anpu 2>/dev/null | grep ":$port" | grep ESTABLISHED | \
+        echo "╔════════════════════╦═══════════════╦════════════╗"
+        echo "║ IP Remota          ║ Puerto Remoto ║ Estado     ║"
+        echo "╠════════════════════╬═══════════════╬════════════╣"
+
+        local connections_found=false
+
+        # Intentar primero con ss
+        if command -v ss >/dev/null 2>&1; then
             while read -r line; do
-                remote_addr=$(echo $line | awk '{print $5}')
-                ip=$(echo $remote_addr | cut -d: -f1)
-                remote_port=$(echo $remote_addr | cut -d: -f2)
-                state=$(echo $line | awk '{print $6}')
-                printf "║ %-18s ║ %-13s ║ %-10s ║\n" "$ip" "$remote_port" "$state"
-            done
-            echo "╚════════════════════╩═══════════════╩════════════╝"
-            
-            total_conn=$(netstat -anp 2>/dev/null | grep ":$port" | grep ESTABLISHED | wc -l)
-            echo -e "\n${GREEN}Total de conexiones: $total_conn${NC}"
-        elif command -v ss >/dev/null 2>&1; then
-            # Código similar para ss si netstat no está disponible
-            total_conn=$(ss -anp 2>/dev/null | grep ":$port" | grep ESTAB | wc -l)
-            echo -e "\n${GREEN}Total de conexiones: $total_conn${NC}"
+                if [ ! -z "$line" ]; then
+                    remote_addr=$(echo "$line" | awk '{print $6}')
+                    ip=$(echo "$remote_addr" | cut -d: -f1)
+                    remote_port=$(echo "$remote_addr" | cut -d: -f2)
+                    printf "║ %-18s ║ %-13s ║ %-10s ║\n" "$ip" "$remote_port" "ACTIVE"
+                    connections_found=true
+                fi
+            done < <(ss -nu state connected sport :"$port" | grep -v "UNCONN" | tail -n +2)
         fi
 
-        # Mostrar uso de recursos de manera más confiable
+        # Si ss no encontró conexiones, intentar con lsof
+        if [ "$connections_found" = false ] && command -v lsof >/dev/null 2>&1; then
+            while read -r line; do
+                remote_addr=$(echo "$line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+')
+                if [ ! -z "$remote_addr" ]; then
+                    ip=$(echo "$remote_addr" | cut -d: -f1)
+                    remote_port=$(echo "$remote_addr" | cut -d: -f2)
+                    printf "║ %-18s ║ %-13s ║ %-10s ║\n" "$ip" "$remote_port" "ACTIVE"
+                    connections_found=true
+                fi
+            done < <(lsof -i UDP:"$port" -n | grep "hysteria")
+        fi
+
+        echo "╚════════════════════╩═══════════════╩════════════╝"
+
+        # Contar conexiones
+        local total_conn=0
+        if command -v ss >/dev/null 2>&1; then
+            total_conn=$(ss -nu state connected sport :"$port" | grep -v "UNCONN" | wc -l)
+            total_conn=$((total_conn-1))  # Restar la línea de encabezado
+        elif command -v lsof >/dev/null 2>&1; then
+            total_conn=$(lsof -i UDP:"$port" -n | grep "hysteria" | wc -l)
+        fi
+        echo -e "\n${GREEN}Total de conexiones: $total_conn${NC}"
+
+        # Mostrar uso de recursos
         echo -e "\n${BLUE}Uso de recursos:${NC}"
         if pid=$(pgrep -f hysteria); then
-            cpu=$(top -b -n 1 -p $pid 2>/dev/null | tail -1 | awk '{print $9}')
-            mem=$(top -b -n 1 -p $pid 2>/dev/null | tail -1 | awk '{print $10}')
-            uptime=$(ps -o etime= -p $pid 2>/dev/null)
+            local top_info=$(top -b -n 1 -p "$pid" 2>/dev/null | tail -1)
+            local cpu=$(echo "$top_info" | awk '{print $9}')
+            local mem=$(echo "$top_info" | awk '{print $10}')
+            local uptime=$(ps -o etime= -p "$pid" 2>/dev/null)
+            
             echo -e "CPU: ${GREEN}${cpu}%${NC}"
             echo -e "Memoria: ${GREEN}${mem}%${NC}"
             echo -e "Tiempo activo: ${GREEN}${uptime}${NC}"
