@@ -330,53 +330,33 @@ monitor_users() {
         return 1
     fi
 
-    # Array para almacenar las conexiones activas (usando IP:Puerto como clave única)
+    # Array para almacenar las conexiones activas
     declare -A active_connections
-    
-    # Variable para controlar la salida
     exit_flag=0
 
     # Función para obtener IPs
     get_ips() {
-        # Obtener IP pública
-        public_ip=$(curl -s https://api.ipify.org 2>/dev/null || 
-                    wget -qO- https://api.ipify.org 2>/dev/null || 
-                    curl -s https://ipinfo.io/ip 2>/dev/null || 
-                    curl -s https://icanhazip.com 2>/dev/null || 
-                    echo "No disponible")
-        
-        # Obtener IP privada
-        private_ip=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1' | head -n 1 || 
-                     hostname -I | awk '{print $1}' || 
-                     echo "No disponible")
+        public_ip=$(curl -s https://api.ipify.org || echo "No disponible")
+        private_ip=$(hostname -I | awk '{print $1}' || echo "No disponible")
     }
 
     # Función para obtener el uso de recursos
     get_system_resources() {
-        # CPU
         local cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}')
-        
-        # Memoria
         local mem_total=$(free -m | awk 'NR==2{print $2}')
         local mem_used=$(free -m | awk 'NR==2{print $3}')
         local mem_percent=$(awk "BEGIN {printf \"%.1f\", $mem_used*100/$mem_total}")
-        
-        # Disco
         local disk_usage=$(df -h / | awk 'NR==2{print $5}')
-        
-        # Si hysteria está en ejecución, obtener su PID y recursos específicos
+
         local hysteria_resources=""
         if pid=$(pgrep -f "hysteria" | head -1); then
             hysteria_resources=$(ps -p $pid -o %cpu,%mem | tail -1)
         fi
 
-        # Obtener IPs
         get_ips
-
         echo -e "${BLUE}IPs del Servidor:${NC}"
         echo -e "├─ IP Pública: ${GREEN}${public_ip}${NC}"
         echo -e "└─ IP Privada: ${GREEN}${private_ip}${NC}\n"
-
         echo -e "${BLUE}Uso de Recursos:${NC}"
         echo -e "├─ CPU Sistema: ${GREEN}${cpu_usage}%${NC}"
         echo -e "├─ RAM: ${GREEN}${mem_used}MB/${mem_total}MB (${mem_percent}%)${NC}"
@@ -406,56 +386,46 @@ monitor_users() {
             return 1
         fi
         
-        # Mostrar información de recursos
         get_system_resources
     }
 
     # Función para procesar cada línea del log
     process_log_line() {
-    local line="$1"
-    echo "Procesando línea: $line"  # Mensaje de depuración
-
-    if [[ $line =~ "client connected" ]]; then
-        local addr=$(echo "$line" | grep -oP '(?<="addr": ")[^"]*')
-        echo "Conexión establecida: $addr"  # Para verificar la conexión
-        local timestamp=$(date +%s)
-        active_connections["$addr"]="$timestamp"
-    elif [[ $line =~ "client disconnected" ]]; then
-        local addr=$(echo "$line" | grep -oP '(?<="addr": ")[^"]*')
-        echo "Conexión cerrada: $addr"  # Para verificar la desconexión
-        unset active_connections["$addr"]
-    fi
-}
-
+        local line="$1"
+        if [[ $line =~ "client connected" ]]; then
+            local addr=$(echo "$line" | grep -oP '(?<="addr": ")[^"]*')
+            local timestamp=$(date +%s)
+            active_connections["$addr"]="$timestamp"
+        elif [[ $line =~ "client disconnected" ]]; then
+            local addr=$(echo "$line" | grep -oP '(?<="addr": ")[^"]*')
+            unset active_connections["$addr"]
+        fi
+    }
 
     # Función para mostrar la tabla de conexiones
     show_connections_table() {
-    local now=$(date +%s)
-    echo -e "\n${BLUE}Conexiones activas:${NC}"
-    echo "╔════════════════════╦═══════════════╦══════════════════╗"
-    echo "║ IP Cliente         ║ Puerto        ║ Tiempo Conectado ║"
-    echo "╠════════════════════╬═══════════════╬══════════════════╣"
-
-    if [ ${#active_connections[@]} -eq 0 ]; then
-        echo "║      No hay conexiones activas actualmente      ║"
-    else
-        for addr in "${!active_connections[@]}"; do
-            echo "Dirección activa: $addr"  # Para verificar direcciones
-            local ip=$(echo "$addr" | cut -d: -f1)
-            local port=$(echo "$addr" | cut -d: -f2)
-            local conn_time=${active_connections[$addr]}
-            
-            local duration=$((now - conn_time))
-            local duration_str=$(printf '%02d:%02d:%02d' $((duration/3600)) $((duration%3600/60)) $((duration%60)))
-            
-            printf "║ %-18s ║ %-13s ║ %-16s ║\n" "$ip" "$port" "$duration_str"
-        done
-    fi
-    
-    echo "╚════════════════════╩═══════════════╩══════════════════╝"
-    echo -e "\n${GREEN}Total de conexiones activas: ${#active_connections[@]}${NC}"
-}
-
+        local now=$(date +%s)
+        echo -e "\n${BLUE}Conexiones activas:${NC}"
+        echo "╔════════════════════╦═══════════════╦══════════════════╗"
+        echo "║ IP Cliente         ║ Puerto        ║ Tiempo Conectado ║"
+        echo "╠════════════════════╬═══════════════╬══════════════════╣"
+        
+        if [ ${#active_connections[@]} -eq 0 ]; then
+            echo "║      No hay conexiones activas actualmente      ║"
+        else
+            for addr in "${!active_connections[@]}"; do
+                local ip=$(echo "$addr" | cut -d: -f1)
+                local port=$(echo "$addr" | cut -d: -f2)
+                local conn_time=${active_connections[$addr]}
+                local duration=$((now - conn_time))
+                local duration_str=$(printf '%02d:%02d:%02d' $((duration/3600)) $((duration%3600/60)) $((duration%60)))
+                printf "║ %-18s ║ %-13s ║ %-16s ║\n" "$ip" "$port" "$duration_str"
+            done
+        fi
+        
+        echo "╚════════════════════╩═══════════════╩══════════════════╝"
+        echo -e "\n${GREEN}Total de conexiones activas: ${#active_connections[@]}${NC}"
+    }
 
     # Cargar conexiones existentes iniciales
     journalctl -u hysteria -n 1000 --no-pager | while read -r line; do
@@ -465,7 +435,7 @@ monitor_users() {
     # Configurar el manejo de entrada no bloqueante
     stty -icanon -echo
     
-    # Bucle principal con actualización periódica y verificación de tecla 0
+    # Bucle principal
     while [ $exit_flag -eq 0 ]; do
         show_header
         show_connections_table
@@ -479,7 +449,7 @@ monitor_users() {
         fi
         
         # Procesar nuevas líneas del log
-        journalctl -u hysteria -n 1 --no-pager | while read -r line; do
+        journalctl -u hysteria -n 0 -f --no-pager | while read -r line; do
             process_log_line "$line"
         done
     done
@@ -490,6 +460,7 @@ monitor_users() {
     echo -e "\n${GREEN}Saliendo del monitor...${NC}"
     sleep 1
 }
+
 change_passwords() {
     if [ ! -f "$CONFIG_FILE" ]; then
         echo -e "${RED}Hysteria no está instalado o configurado.${NC}"
