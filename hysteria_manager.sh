@@ -117,7 +117,7 @@ install_hysteria() {
         echo -e "${RED}Error: El ejecutable de Hysteria no funciona correctamente${NC}"
         log_message "Error: Ejecutable de Hysteria no funcional"
         return 1
-    fi
+    }
 
     # Configuración mejorada
     mkdir -p /etc/hysteria
@@ -144,7 +144,7 @@ install_hysteria() {
         DOWNLOAD_SPEED=${custom_download:-$DOWNLOAD_SPEED}
     fi
 
-    # Crear configuración con formato mejorado
+    # Crear configuración con formato corregido
     cat > "$CONFIG_FILE" << EOF
 {
     "listen": ":$PORT",
@@ -168,10 +168,7 @@ install_hysteria() {
     },
     "resolver": {
         "type": "udp",
-        "tcp": false,
-        "udp": true,
-        "timeout": "10s",
-        "address": "8.8.8.8:53"
+        "servers": ["8.8.8.8:53", "8.8.4.4:53"]
     },
     "acl": {
         "inline": [
