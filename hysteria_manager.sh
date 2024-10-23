@@ -107,7 +107,6 @@ install_hysteria() {
 
     # Configuración mejorada
     mkdir -p /etc/hysteria
-    chmod 755 /etc/hysteria
 
     PUBLIC_IP=$(get_ip "public")
     PRIVATE_IP=$(get_ip "private")
@@ -130,15 +129,21 @@ install_hysteria() {
         DOWNLOAD_SPEED=${custom_download:-$DOWNLOAD_SPEED}
     fi
 
-    # Crear configuración del servidor
+    # Crear configuración con formato mejorado usando jq
     cat > "$CONFIG_FILE" << EOF
 {
     "listen": ":$PORT",
     "protocol": "udp",
     "up_mbps": $UPLOAD_SPEED,
     "down_mbps": $DOWNLOAD_SPEED,
-    "obfs": "salamander:$OBFS_PASSWORD",
-    "auth": "$AUTH_PASSWORD",
+    "obfs": {
+        "type": "salamander",
+        "password": "$OBFS_PASSWORD"
+    },
+    "auth": {
+        "type": "password",
+        "password": "$AUTH_PASSWORD"
+    },
     "masquerade": {
         "type": "proxy",
         "proxy": {
@@ -148,7 +153,10 @@ install_hysteria() {
     },
     "resolver": {
         "type": "udp",
-        "servers": ["8.8.8.8:53", "8.8.4.4:53"]
+        "tcp": false,
+        "udp": true,
+        "timeout": "10s",
+        "address": "8.8.8.8:53"
     },
     "acl": {
         "inline": [
@@ -160,32 +168,7 @@ install_hysteria() {
 }
 EOF
 
-    # Crear configuración de cliente
-    mkdir -p /etc/hysteria/client
-    cat > "/etc/hysteria/client/config.json" << EOF
-{
-    "server": "$PUBLIC_IP:$PORT",
-    "protocol": "udp",
-    "up_mbps": $UPLOAD_SPEED,
-    "down_mbps": $DOWNLOAD_SPEED,
-    "obfs": "salamander:$OBFS_PASSWORD",
-    "auth": "$AUTH_PASSWORD",
-    "resolver": {
-        "type": "udp",
-        "servers": ["8.8.8.8:53", "8.8.4.4:53"]
-    },
-    "socks5": {
-        "listen": "127.0.0.1:1080"
-    }
-}
-EOF
-
-    # Establecer permisos correctos
-    chmod 644 "$CONFIG_FILE"
-    chmod 644 "/etc/hysteria/client/config.json"
-    chown -R root:root /etc/hysteria
-
-    # Crear servicio systemd
+    # Crear servicio systemd mejorado
     cat > /etc/systemd/system/hysteria.service << EOF
 [Unit]
 Description=Hysteria Server
@@ -196,17 +179,13 @@ Wants=network-online.target
 Type=simple
 User=root
 ExecStart=/usr/local/bin/hysteria server -c /etc/hysteria/config.json
-Restart=on-failure
+Restart=always
 RestartSec=3
 LimitNOFILE=infinity
-WorkingDirectory=/etc/hysteria
 
 [Install]
 WantedBy=multi-user.target
 EOF
-
-    chmod 644 /etc/systemd/system/hysteria.service
-    chown root:root /etc/systemd/system/hysteria.service
 
     # Configurar firewall
     if command -v ufw &> /dev/null; then
@@ -216,23 +195,15 @@ EOF
         firewall-cmd --reload
     fi
 
-    # Recargar y habilitar el servicio
     systemctl daemon-reload
     systemctl enable hysteria
     systemctl start hysteria
 
     echo -e "${GREEN}Instalación completada exitosamente.${NC}"
-    echo -e "${YELLOW}Configuración del servidor en: /etc/hysteria/config.json${NC}"
-    echo -e "${YELLOW}Configuración del cliente en: /etc/hysteria/client/config.json${NC}"
-    
-    # Mostrar información de conexión
-    echo -e "\n${BLUE}Información de conexión:${NC}"
-    echo -e "Servidor: $PUBLIC_IP:$PORT"
-    echo -e "Contraseña de autenticación: $AUTH_PASSWORD"
-    echo -e "Contraseña de ofuscación: $OBFS_PASSWORD"
-    
     log_message "Instalación completada"
+    show_config
 }
+
 # Función para verificar e instalar jq
 check_jq() {
     if ! command -v jq >/dev/null 2>&1; then
@@ -468,7 +439,3 @@ while true; do
     echo -e "\nPresione Enter para continuar..."
     read -r
 done
-
-
-
-
