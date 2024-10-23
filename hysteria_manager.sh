@@ -328,35 +328,30 @@ monitor_users() {
     if ! command -v journalctl >/dev/null 2>&1; then
         echo -e "${RED}journalctl no está disponible. Por favor, instale systemd.${NC}"
         return 1
-    fi
-
-    # Array para almacenar las conexiones activas
-    declare -A active_connections
-    exit_flag=0
-
-    # Función para obtener IPs
-    get_ips() {
-        public_ip=$(curl -s https://api.ipify.org || echo "No disponible")
-        private_ip=$(hostname -I | awk '{print $1}' || echo "No disponible")
     }
+
+    # Array para almacenar las conexiones activas (usando IP:Puerto como clave única)
+    declare -A active_connections
 
     # Función para obtener el uso de recursos
     get_system_resources() {
+        # CPU
         local cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}')
+        
+        # Memoria
         local mem_total=$(free -m | awk 'NR==2{print $2}')
         local mem_used=$(free -m | awk 'NR==2{print $3}')
         local mem_percent=$(awk "BEGIN {printf \"%.1f\", $mem_used*100/$mem_total}")
+        
+        # Disco
         local disk_usage=$(df -h / | awk 'NR==2{print $5}')
-
+        
+        # Si hysteria está en ejecución, obtener su PID y recursos específicos
         local hysteria_resources=""
         if pid=$(pgrep -f "hysteria" | head -1); then
             hysteria_resources=$(ps -p $pid -o %cpu,%mem | tail -1)
         fi
 
-        get_ips
-        echo -e "${BLUE}IPs del Servidor:${NC}"
-        echo -e "├─ IP Pública: ${GREEN}${public_ip}${NC}"
-        echo -e "└─ IP Privada: ${GREEN}${private_ip}${NC}\n"
         echo -e "${BLUE}Uso de Recursos:${NC}"
         echo -e "├─ CPU Sistema: ${GREEN}${cpu_usage}%${NC}"
         echo -e "├─ RAM: ${GREEN}${mem_used}MB/${mem_total}MB (${mem_percent}%)${NC}"
@@ -377,15 +372,16 @@ monitor_users() {
         echo -e "${YELLOW}=== Monitor de Usuarios de Hysteria ===${NC}"
         echo -e "${BLUE}Monitoreando conexiones en tiempo real...${NC}"
         echo -e "${PURPLE}Fecha y hora: ${NC}$(date '+%Y-%m-%d %H:%M:%S')"
-        echo -e "${YELLOW}Presione 0 para salir${NC}\n"
+        echo -e "${YELLOW}Presione Ctrl+C para salir${NC}\n"
         
         if systemctl is-active --quiet hysteria; then
-            echo -e "${GREEN}Estado del servicio: Activo${NC}${NC}\n"
+            echo -e "${GREEN}Estado del servicio: Activo${NC}\n"
         else
             echo -e "${RED}Estado del servicio: Inactivo${NC}\n"
             return 1
         fi
         
+        # Mostrar información de recursos
         get_system_resources
     }
 
@@ -394,7 +390,7 @@ monitor_users() {
         local line="$1"
         if [[ $line =~ "client connected" ]]; then
             local addr=$(echo "$line" | grep -oP '(?<="addr": ")[^"]*')
-            local timestamp=$(date +%s)
+            local timestamp=$(echo "$line" | grep -oP '\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}')
             active_connections["$addr"]="$timestamp"
         elif [[ $line =~ "client disconnected" ]]; then
             local addr=$(echo "$line" | grep -oP '(?<="addr": ")[^"]*')
@@ -404,61 +400,44 @@ monitor_users() {
 
     # Función para mostrar la tabla de conexiones
     show_connections_table() {
-        local now=$(date +%s)
         echo -e "\n${BLUE}Conexiones activas:${NC}"
         echo "╔════════════════════╦═══════════════╦══════════════════╗"
         echo "║ IP Cliente         ║ Puerto        ║ Tiempo Conectado ║"
         echo "╠════════════════════╬═══════════════╬══════════════════╣"
         
-        if [ ${#active_connections[@]} -eq 0 ]; then
-            echo "║      No hay conexiones activas actualmente      ║"
-        else
-            for addr in "${!active_connections[@]}"; do
-                local ip=$(echo "$addr" | cut -d: -f1)
-                local port=$(echo "$addr" | cut -d: -f2)
-                local conn_time=${active_connections[$addr]}
-                local duration=$((now - conn_time))
-                local duration_str=$(printf '%02d:%02d:%02d' $((duration/3600)) $((duration%3600/60)) $((duration%60)))
-                printf "║ %-18s ║ %-13s ║ %-16s ║\n" "$ip" "$port" "$duration_str"
-            done
-        fi
+        local now=$(date +%s)
+        for addr in "${!active_connections[@]}"; do
+            local ip=$(echo "$addr" | cut -d: -f1)
+            local port=$(echo "$addr" | cut -d: -f2)
+            local timestamp="${active_connections[$addr]}"
+            
+            local conn_time=$(date -d "$timestamp" +%s)
+            local duration=$((now - conn_time))
+            local duration_str=$(printf '%02d:%02d:%02d' $((duration/3600)) $((duration%3600/60)) $((duration%60)))
+            
+            printf "║ %-18s ║ %-13s ║ %-16s ║\n" "$ip" "$port" "$duration_str"
+        done
         
         echo "╚════════════════════╩═══════════════╩══════════════════╝"
         echo -e "\n${GREEN}Total de conexiones activas: ${#active_connections[@]}${NC}"
     }
 
-    # Cargar conexiones existentes iniciales
+    # Capturar Ctrl+C
+    trap 'echo -e "\n${GREEN}Saliendo del monitor...${NC}"; exit' SIGINT
+
+    # Cargar conexiones existentes
+    show_header
     journalctl -u hysteria -n 1000 --no-pager | while read -r line; do
         process_log_line "$line"
     done
+    show_connections_table
 
-    # Configurar el manejo de entrada no bloqueante
-    stty -icanon -echo
-    
-    # Bucle principal
-    while [ $exit_flag -eq 0 ]; do
+    # Monitorear nuevas conexiones en tiempo real
+    journalctl -u hysteria -f | while read -r line; do
+        process_log_line "$line"
         show_header
         show_connections_table
-        
-        # Verificar si se presionó la tecla 0
-        if read -t 1 -n 1 input; then
-            if [ "$input" = "0" ]; then
-                exit_flag=1
-                break
-            fi
-        fi
-        
-        # Procesar nuevas líneas del log
-        journalctl -u hysteria -f --no-pager | while read -r line; do
-            process_log_line "$line"
-        done | (while read -r line; do process_log_line "$line"; done)
     done
-
-    # Restaurar la configuración normal del terminal
-    stty icanon echo
-    
-    echo -e "\n${GREEN}Saliendo del monitor...${NC}"
-    sleep 1
 }
 
 change_passwords() {
