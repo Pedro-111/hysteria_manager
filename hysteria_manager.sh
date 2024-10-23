@@ -380,7 +380,7 @@ monitor_users() {
         echo -e "${YELLOW}Presione 0 para salir${NC}\n"
         
         if systemctl is-active --quiet hysteria; then
-            echo -e "${GREEN}Estado del servicio: Activo${NC}\n"
+            echo -e "${GREEN}Estado del servicio: Activo${NC}${NC}\n"
         else
             echo -e "${RED}Estado del servicio: Inactivo${NC}\n"
             return 1
@@ -449,9 +449,9 @@ monitor_users() {
         fi
         
         # Procesar nuevas líneas del log
-        journalctl -u hysteria -n 0 -f --no-pager | while read -r line; do
+        journalctl -u hysteria -f --no-pager | while read -r line; do
             process_log_line "$line"
-        done
+        done | (while read -r line; do process_log_line "$line"; done)
     done
 
     # Restaurar la configuración normal del terminal
