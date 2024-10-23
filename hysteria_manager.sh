@@ -329,10 +329,10 @@ monitor_users() {
         echo -e "${RED}journalctl no está disponible. Por favor, instale systemd.${NC}"
         return 1
     fi
-    
+
     # Array para almacenar las conexiones activas (usando IP:Puerto como clave única)
     declare -A active_connections
-    
+
     # Función para obtener el uso de recursos
     get_system_resources() {
         # CPU
@@ -351,7 +351,7 @@ monitor_users() {
         if pid=$(pgrep -f "hysteria" | head -1); then
             hysteria_resources=$(ps -p $pid -o %cpu,%mem | tail -1)
         fi
-        
+
         echo -e "${BLUE}Uso de Recursos:${NC}"
         echo -e "├─ CPU Sistema: ${GREEN}${cpu_usage}%${NC}"
         echo -e "├─ RAM: ${GREEN}${mem_used}MB/${mem_total}MB (${mem_percent}%)${NC}"
@@ -372,7 +372,7 @@ monitor_users() {
         echo -e "${YELLOW}=== Monitor de Usuarios de Hysteria ===${NC}"
         echo -e "${BLUE}Monitoreando conexiones en tiempo real...${NC}"
         echo -e "${PURPLE}Fecha y hora: ${NC}$(date '+%Y-%m-%d %H:%M:%S')"
-        echo -e "${YELLOW}Presione Ctrl+C para salir${NC}\n"
+        echo -e "${YELLOW}Presione 'q' para salir${NC}\n"
         
         if systemctl is-active --quiet hysteria; then
             echo -e "${GREEN}Estado del servicio: Activo${NC}\n"
@@ -422,14 +422,8 @@ monitor_users() {
         echo -e "\n${GREEN}Total de conexiones activas: ${#active_connections[@]}${NC}"
     }
 
-    # Función para limpiar y salir
-    clean_exit() {
-        echo -e "\n${GREEN}Saliendo del monitor...${NC}"
-        exit 0
-    }
-
-    # Capturar Ctrl+C y otras señales de terminación
-    trap clean_exit SIGINT SIGTERM
+    # Capturar Ctrl+C
+    trap '' SIGINT
 
     # Cargar conexiones existentes
     show_header
@@ -443,7 +437,17 @@ monitor_users() {
         process_log_line "$line"
         show_header
         show_connections_table
+
+        # Verificar si se ha presionado 'q' para salir
+        if read -t 0.1 -n 1 key; then
+            if [[ $key = "q" ]]; then
+                echo -e "\n${GREEN}Saliendo del monitor...${NC}"
+                break
+            fi
+        fi
     done
+
+    return 0
 }
 
 
