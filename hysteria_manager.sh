@@ -129,7 +129,7 @@ install_hysteria() {
         DOWNLOAD_SPEED=${custom_download:-$DOWNLOAD_SPEED}
     fi
 
-   # Modificar la función install_hysteria con el formato correcto para obfs y auth
+   # Primero, vamos a verificar que el archivo de configuración sea correcto
 cat > "$CONFIG_FILE" << EOF
 {
     "listen": ":$PORT",
@@ -141,6 +141,8 @@ cat > "$CONFIG_FILE" << EOF
         "password": "$OBFS_PASSWORD"
     },
     "auth_str": "$AUTH_PASSWORD",
+    "cert": "/etc/hysteria/cert.crt",
+    "key": "/etc/hysteria/private.key",
     "masquerade": {
         "type": "proxy",
         "proxy": {
@@ -165,8 +167,16 @@ cat > "$CONFIG_FILE" << EOF
 }
 EOF
 
-    # Crear servicio systemd mejorado
-    cat > /etc/systemd/system/hysteria.service << EOF
+# Ahora, vamos a crear un certificado autofirmado para el servidor
+mkdir -p /etc/hysteria
+openssl req -x509 -nodes -newkey rsa:4096 -keyout /etc/hysteria/private.key -out /etc/hysteria/cert.crt -days 365 -subj "/CN=hysteria.local"
+
+# Corregir los permisos
+chmod 644 /etc/hysteria/cert.crt
+chmod 600 /etc/hysteria/private.key
+
+# Actualizar el servicio systemd
+cat > /etc/systemd/system/hysteria.service << EOF
 [Unit]
 Description=Hysteria Server
 After=network.target
@@ -175,6 +185,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
+WorkingDirectory=/etc/hysteria
 ExecStart=/usr/local/bin/hysteria server -c /etc/hysteria/config.json
 Restart=always
 RestartSec=3
