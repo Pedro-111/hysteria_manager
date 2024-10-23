@@ -129,15 +129,18 @@ install_hysteria() {
         DOWNLOAD_SPEED=${custom_download:-$DOWNLOAD_SPEED}
     fi
 
-    # Crear configuración con formato mejorado usando jq
+   # Modificar la función install_hysteria con el formato correcto para obfs y auth
 cat > "$CONFIG_FILE" << EOF
 {
     "listen": ":$PORT",
     "protocol": "udp",
     "up_mbps": $UPLOAD_SPEED,
     "down_mbps": $DOWNLOAD_SPEED,
-    "obfs": "$OBFS_PASSWORD",
-    "auth": "$AUTH_PASSWORD",
+    "obfs": {
+        "type": "salamander",
+        "password": "$OBFS_PASSWORD"
+    },
+    "auth_str": "$AUTH_PASSWORD",
     "masquerade": {
         "type": "proxy",
         "proxy": {
