@@ -102,11 +102,26 @@ install_hysteria() {
     LATEST_VERSION=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep -oP '"tag_name": "\K(.*)(?=")')
     DOWNLOAD_URL="https://github.com/apernet/hysteria/releases/download/${LATEST_VERSION}/hysteria-linux-amd64"
 
+    # Descargar y verificar el ejecutable
     wget -O /usr/local/bin/hysteria "$DOWNLOAD_URL"
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Error al descargar Hysteria${NC}"
+        log_message "Error: Fallo en la descarga de Hysteria"
+        return 1
+    fi
+
     chmod +x /usr/local/bin/hysteria
+    
+    # Verificar que el ejecutable funciona
+    if ! /usr/local/bin/hysteria -v &>/dev/null; then
+        echo -e "${RED}Error: El ejecutable de Hysteria no funciona correctamente${NC}"
+        log_message "Error: Ejecutable de Hysteria no funcional"
+        return 1
+    }
 
     # Configuración mejorada
     mkdir -p /etc/hysteria
+    chmod 755 /etc/hysteria
 
     PUBLIC_IP=$(get_ip "public")
     PRIVATE_IP=$(get_ip "private")
@@ -129,7 +144,7 @@ install_hysteria() {
         DOWNLOAD_SPEED=${custom_download:-$DOWNLOAD_SPEED}
     fi
 
-    # Crear configuración con formato mejorado usando jq
+    # Crear configuración con formato mejorado
     cat > "$CONFIG_FILE" << EOF
 {
     "listen": ":$PORT",
@@ -168,6 +183,17 @@ install_hysteria() {
 }
 EOF
 
+    # Establecer permisos correctos
+    chmod 644 "$CONFIG_FILE"
+    chown root:root "$CONFIG_FILE"
+
+    # Verificar la configuración
+    if ! /usr/local/bin/hysteria verify -c "$CONFIG_FILE"; then
+        echo -e "${RED}Error: La configuración no es válida${NC}"
+        log_message "Error: Configuración inválida"
+        return 1
+    fi
+
     # Crear servicio systemd mejorado
     cat > /etc/systemd/system/hysteria.service << EOF
 [Unit]
@@ -178,14 +204,19 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
+ExecStartPre=/usr/local/bin/hysteria verify -c /etc/hysteria/config.json
 ExecStart=/usr/local/bin/hysteria server -c /etc/hysteria/config.json
-Restart=always
+Restart=on-failure
 RestartSec=3
 LimitNOFILE=infinity
+WorkingDirectory=/etc/hysteria
 
 [Install]
 WantedBy=multi-user.target
 EOF
+
+    chmod 644 /etc/systemd/system/hysteria.service
+    chown root:root /etc/systemd/system/hysteria.service
 
     # Configurar firewall
     if command -v ufw &> /dev/null; then
@@ -195,9 +226,22 @@ EOF
         firewall-cmd --reload
     fi
 
+    # Recargar y habilitar el servicio
     systemctl daemon-reload
     systemctl enable hysteria
-    systemctl start hysteria
+    if ! systemctl start hysteria; then
+        echo -e "${RED}Error al iniciar el servicio. Verificando logs...${NC}"
+        journalctl -u hysteria.service -n 50 --no-pager
+        return 1
+    fi
+
+    # Verificar que el servicio está funcionando
+    sleep 2
+    if ! systemctl is-active hysteria >/dev/null 2>&1; then
+        echo -e "${RED}Error: El servicio no está activo${NC}"
+        log_message "Error: Servicio no activo después de la instalación"
+        return 1
+    fi
 
     echo -e "${GREEN}Instalación completada exitosamente.${NC}"
     log_message "Instalación completada"
