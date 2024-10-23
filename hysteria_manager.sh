@@ -328,7 +328,7 @@ monitor_users() {
     if ! command -v journalctl >/dev/null 2>&1; then
         echo -e "${RED}journalctl no está disponible. Por favor, instale systemd.${NC}"
         return 1
-    fi
+    }
 
     # Array para almacenar las conexiones activas (usando IP:Puerto como clave única)
     declare -A active_connections
@@ -372,7 +372,7 @@ monitor_users() {
         echo -e "${YELLOW}=== Monitor de Usuarios de Hysteria ===${NC}"
         echo -e "${BLUE}Monitoreando conexiones en tiempo real...${NC}"
         echo -e "${PURPLE}Fecha y hora: ${NC}$(date '+%Y-%m-%d %H:%M:%S')"
-        echo -e "${YELLOW}Presione Ctrl+C para salir${NC}\n"
+        echo -e "${YELLOW}Presione 0 para salir${NC}\n"
         
         if systemctl is-active --quiet hysteria; then
             echo -e "${GREEN}Estado del servicio: Activo${NC}\n"
@@ -422,8 +422,27 @@ monitor_users() {
         echo -e "\n${GREEN}Total de conexiones activas: ${#active_connections[@]}${NC}"
     }
 
-    # Capturar Ctrl+C
-    trap 'echo -e "\n${GREEN}Saliendo del monitor...${NC}"; exit' SIGINT
+    # Variable para controlar el bucle de monitoreo
+    local monitoring=true
+
+    # Crear un named pipe para la entrada del usuario
+    local pipe="/tmp/monitor_pipe"
+    mkfifo "$pipe" 2>/dev/null
+    exec 3<>"$pipe"
+    rm "$pipe"
+
+    # Iniciar lectura de entrada en segundo plano
+    {
+        while $monitoring; do
+            read -n 1 key
+            if [[ "$key" == "0" ]]; then
+                monitoring=false
+                # Matar el proceso de journalctl
+                pkill -f "journalctl -u hysteria -f"
+                break
+            fi
+        done
+    } <&3 &
 
     # Cargar conexiones existentes
     show_header
@@ -433,11 +452,19 @@ monitor_users() {
     show_connections_table
 
     # Monitorear nuevas conexiones en tiempo real
-    journalctl -u hysteria -f | while read -r line; do
-        process_log_line "$line"
-        show_header
-        show_connections_table
+    while $monitoring; do
+        journalctl -u hysteria -f | while $monitoring && read -r line; do
+            process_log_line "$line"
+            show_header
+            show_connections_table
+        done
+        [ "$monitoring" = false ] && break
     done
+
+    # Limpiar y salir
+    exec 3>&-
+    echo -e "\n${GREEN}Monitor finalizado exitosamente${NC}"
+    return 0
 }
 change_passwords() {
     if [ ! -f "$CONFIG_FILE" ]; then
