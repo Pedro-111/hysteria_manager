@@ -130,20 +130,14 @@ install_hysteria() {
     fi
 
     # Crear configuración con formato mejorado usando jq
-    cat > "$CONFIG_FILE" << EOF
+cat > "$CONFIG_FILE" << EOF
 {
     "listen": ":$PORT",
     "protocol": "udp",
     "up_mbps": $UPLOAD_SPEED,
     "down_mbps": $DOWNLOAD_SPEED,
-    "obfs": {
-        "type": "salamander",
-        "password": "$OBFS_PASSWORD"
-    },
-    "auth": {
-        "type": "password",
-        "password": "$AUTH_PASSWORD"
-    },
+    "obfs": "$OBFS_PASSWORD",
+    "auth": "$AUTH_PASSWORD",
     "masquerade": {
         "type": "proxy",
         "proxy": {
