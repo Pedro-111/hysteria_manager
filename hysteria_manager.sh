@@ -117,7 +117,7 @@ install_hysteria() {
         echo -e "${RED}Error: El ejecutable de Hysteria no funciona correctamente${NC}"
         log_message "Error: Ejecutable de Hysteria no funcional"
         return 1
-    }
+    fi
 
     # Configuración mejorada
     mkdir -p /etc/hysteria
