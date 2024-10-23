@@ -279,11 +279,15 @@ monitor_users() {
         return
     fi
 
+    # Capturar Ctrl+C y tecla 0
+    trap 'echo -e "\n${GREEN}Saliendo del monitor...${NC}"; return' SIGINT
+
     while true; do
         clear
         echo -e "${YELLOW}=== Monitor de Usuarios de Hysteria ===${NC}"
-        echo -e "${BLUE}Actualizando cada 3 segundos... (Presiona Ctrl+C para salir)${NC}"
+        echo -e "${BLUE}Actualizando cada 3 segundos...${NC}"
         echo -e "${PURPLE}Fecha y hora: ${NC}$(date '+%Y-%m-%d %H:%M:%S')"
+        echo -e "${YELLOW}Presione '0' y Enter para salir${NC}"
         
         # Mostrar estado del servicio
         if systemctl is-active --quiet hysteria; then
@@ -299,7 +303,7 @@ monitor_users() {
             echo "╔════════════════════╦═══════════════╦════════════╗"
             echo "║ IP Remota          ║ Puerto Remoto ║ Estado     ║"
             echo "╠════════════════════╬═══════════════╬════════════╣"
-            netstat -anpu | grep :$port | grep ESTABLISHED | \
+            netstat -anpu 2>/dev/null | grep ":$port" | grep ESTABLISHED | \
             while read -r line; do
                 remote_addr=$(echo $line | awk '{print $5}')
                 ip=$(echo $remote_addr | cut -d: -f1)
@@ -309,43 +313,31 @@ monitor_users() {
             done
             echo "╚════════════════════╩═══════════════╩════════════╝"
             
-            # Mostrar contador de conexiones
-            total_conn=$(netstat -anp | grep :$port | grep ESTABLISHED | wc -l)
+            total_conn=$(netstat -anp 2>/dev/null | grep ":$port" | grep ESTABLISHED | wc -l)
             echo -e "\n${GREEN}Total de conexiones: $total_conn${NC}"
         elif command -v ss >/dev/null 2>&1; then
-            echo "╔════════════════════╦═══════════════╦════════════╗"
-            echo "║ IP Remota          ║ Puerto Remoto ║ Estado     ║"
-            echo "╠════════════════════╬═══════════════╬════════════╣"
-            ss -anpu | grep :$port | grep ESTAB | \
-            while read -r line; do
-                remote_addr=$(echo $line | awk '{print $6}')
-                ip=$(echo $remote_addr | cut -d: -f1)
-                remote_port=$(echo $remote_addr | cut -d: -f2)
-                state="ESTABLISHED"
-                printf "║ %-18s ║ %-13s ║ %-10s ║\n" "$ip" "$remote_port" "$state"
-            done
-            echo "╚════════════════════╩═══════════════╩════════════╝"
-            
-            # Mostrar contador de conexiones
-            total_conn=$(ss -anp | grep :$port | grep ESTAB | wc -l)
+            # Código similar para ss si netstat no está disponible
+            total_conn=$(ss -anp 2>/dev/null | grep ":$port" | grep ESTAB | wc -l)
             echo -e "\n${GREEN}Total de conexiones: $total_conn${NC}"
-        else
-            echo -e "${RED}No se pueden obtener estadísticas (netstat/ss no disponible)${NC}"
         fi
 
-        # Mostrar uso de recursos
+        # Mostrar uso de recursos de manera más confiable
         echo -e "\n${BLUE}Uso de recursos:${NC}"
-        if pgrep -f hysteria >/dev/null; then
-            pid=$(pgrep -f hysteria)
-            cpu_usage=$(ps -p $pid -o %cpu | tail -n 1)
-            mem_usage=$(ps -p $pid -o %mem | tail -n 1)
-            uptime=$(ps -o etime= -p $pid)
-            echo -e "CPU: ${GREEN}${cpu_usage}%${NC}"
-            echo -e "Memoria: ${GREEN}${mem_usage}%${NC}"
+        if pid=$(pgrep -f hysteria); then
+            cpu=$(top -b -n 1 -p $pid 2>/dev/null | tail -1 | awk '{print $9}')
+            mem=$(top -b -n 1 -p $pid 2>/dev/null | tail -1 | awk '{print $10}')
+            uptime=$(ps -o etime= -p $pid 2>/dev/null)
+            echo -e "CPU: ${GREEN}${cpu}%${NC}"
+            echo -e "Memoria: ${GREEN}${mem}%${NC}"
             echo -e "Tiempo activo: ${GREEN}${uptime}${NC}"
         fi
 
-        sleep 3
+        # Leer input con timeout
+        read -t 3 -n 1 input
+        if [ "$input" = "0" ]; then
+            echo -e "\n${GREEN}Saliendo del monitor...${NC}"
+            break
+        fi
     done
 }
 change_passwords() {
