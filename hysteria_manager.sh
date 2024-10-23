@@ -333,6 +333,9 @@ monitor_users() {
     # Array para almacenar las conexiones activas (usando IP:Puerto como clave única)
     declare -A active_connections
 
+    # Variable para controlar el bucle principal
+    running=true
+
     # Función para obtener el uso de recursos
     get_system_resources() {
         # CPU
@@ -372,7 +375,7 @@ monitor_users() {
         echo -e "${YELLOW}=== Monitor de Usuarios de Hysteria ===${NC}"
         echo -e "${BLUE}Monitoreando conexiones en tiempo real...${NC}"
         echo -e "${PURPLE}Fecha y hora: ${NC}$(date '+%Y-%m-%d %H:%M:%S')"
-        echo -e "${YELLOW}Presione Ctrl+C para salir${NC}\n"
+        echo -e "${YELLOW}Presione 0 para salir${NC}\n"
         
         if systemctl is-active --quiet hysteria; then
             echo -e "${GREEN}Estado del servicio: Activo${NC}\n"
@@ -390,7 +393,7 @@ monitor_users() {
         local line="$1"
         if [[ $line =~ "client connected" ]]; then
             local addr=$(echo "$line" | grep -oP '(?<="addr": ")[^"]*')
-            local timestamp=$(echo "$line" | grep -oP '\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}')
+            local timestamp=$(date +%s)  # Guardamos el timestamp en segundos Unix
             active_connections["$addr"]="$timestamp"
         elif [[ $line =~ "client disconnected" ]]; then
             local addr=$(echo "$line" | grep -oP '(?<="addr": ")[^"]*')
@@ -409,9 +412,8 @@ monitor_users() {
         for addr in "${!active_connections[@]}"; do
             local ip=$(echo "$addr" | cut -d: -f1)
             local port=$(echo "$addr" | cut -d: -f2)
-            local timestamp="${active_connections[$addr]}"
+            local conn_time="${active_connections[$addr]}"
             
-            local conn_time=$(date -d "$timestamp" +%s)
             local duration=$((now - conn_time))
             local duration_str=$(printf '%02d:%02d:%02d' $((duration/3600)) $((duration%3600/60)) $((duration%60)))
             
@@ -422,21 +424,31 @@ monitor_users() {
         echo -e "\n${GREEN}Total de conexiones activas: ${#active_connections[@]}${NC}"
     }
 
+    # Función para manejar la entrada del usuario
+    check_user_input() {
+        local key
+        read -t 1 -n 1 key
+        if [[ $key == "0" ]]; then
+            running=false
+            echo -e "\n${GREEN}Saliendo del monitor...${NC}"
+            exit 0
+        fi
+    }
+
     # Capturar Ctrl+C
     trap 'echo -e "\n${GREEN}Saliendo del monitor...${NC}"; exit' SIGINT
 
     # Cargar conexiones existentes
-    show_header
     journalctl -u hysteria -n 1000 --no-pager | while read -r line; do
         process_log_line "$line"
     done
-    show_connections_table
 
-    # Monitorear nuevas conexiones en tiempo real
-    journalctl -u hysteria -f | while read -r line; do
-        process_log_line "$line"
+    # Bucle principal
+    while $running; do
         show_header
         show_connections_table
+        check_user_input
+        sleep 1
     done
 }
 change_passwords() {
