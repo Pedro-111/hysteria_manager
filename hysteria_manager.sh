@@ -80,138 +80,67 @@ monitor_resources() {
     echo "Conexiones activas: $(netstat -an | grep :$PORT | grep ESTABLISHED | wc -l)"
 }
 
-# Función mejorada de instalación
+# Función para instalar y configurar Hysteria
 install_hysteria() {
-    check_root
-    check_dependencies
-
     echo -e "${YELLOW}Instalando Hysteria...${NC}"
-    log_message "Iniciando instalación de Hysteria"
-
-    # Verificar instalación previa
-    if [ -f "/usr/local/bin/hysteria" ]; then
-        echo -e "${YELLOW}Hysteria ya está instalado. ¿Desea reinstalar? (s/n)${NC}"
-        read -r reinstall
-        if [ "$reinstall" != "s" ]; then
-            return
-        fi
-        backup_config
-    fi
-
-    # Obtener última versión de GitHub
-    LATEST_VERSION=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep -oP '"tag_name": "\K(.*)(?=")')
-    DOWNLOAD_URL="https://github.com/apernet/hysteria/releases/download/${LATEST_VERSION}/hysteria-linux-amd64"
-
-    wget -O /usr/local/bin/hysteria "$DOWNLOAD_URL"
-    chmod +x /usr/local/bin/hysteria
-
-    # Configuración mejorada
+    
+    # Actualizar el sistema e instalar dependencias
+    apt update && apt upgrade -y
+    apt install -y curl wget unzip openssl
+    # Descargar e instalar Hysteria
+    wget https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64
+    chmod +x hysteria-linux-amd64
+    mv hysteria-linux-amd64 /usr/local/bin/hysteria
+    # Crear directorio de configuración
     mkdir -p /etc/hysteria
-
-    PUBLIC_IP=$(get_ip "public")
-    PRIVATE_IP=$(get_ip "private")
-    PORT=$(shuf -i 10000-65535 -n 1)
+    # Generar certificado autofirmado
+    openssl req -x509 -nodes -newkey rsa:4096 -keyout /etc/hysteria/server.key -out /etc/hysteria/server.crt -days 365 -subj "/CN=hysteria.server"
+    # Solicitar puerto
+    read -p "Ingrese el puerto para Hysteria (default: 36712): " PORT
+    PORT=${PORT:-36712}
+    # Generar contraseñas aleatorias
     OBFS_PASSWORD=$(generate_password)
     AUTH_PASSWORD=$(generate_password)
-    UPLOAD_SPEED=100
-    DOWNLOAD_SPEED=100
-
-    # Preguntar por valores personalizados
-    echo -e "${YELLOW}¿Desea personalizar la configuración? (s/n)${NC}"
-    read -r customize
-    if [ "$customize" = "s" ]; then
-        read -p "Puerto (default: $PORT): " custom_port
-        read -p "Velocidad de subida en Mbps (default: $UPLOAD_SPEED): " custom_upload
-        read -p "Velocidad de bajada en Mbps (default: $DOWNLOAD_SPEED): " custom_download
-
-        PORT=${custom_port:-$PORT}
-        UPLOAD_SPEED=${custom_upload:-$UPLOAD_SPEED}
-        DOWNLOAD_SPEED=${custom_download:-$DOWNLOAD_SPEED}
-    fi
-
-   # Primero, vamos a verificar que el archivo de configuración sea correcto
-cat > "$CONFIG_FILE" << EOF
+    # Obtener la IP pública
+    PUBLIC_IP=$(curl -s https://api.ipify.org)
+    # Crear archivo de configuración
+    cat > /etc/hysteria/config.json <<EOF
 {
-    "listen": ":$PORT",
-    "protocol": "udp",
-    "up_mbps": $UPLOAD_SPEED,
-    "down_mbps": $DOWNLOAD_SPEED,
-    "obfs": {
-        "type": "salamander",
-        "password": "$OBFS_PASSWORD"
-    },
-    "auth_str": "$AUTH_PASSWORD",
-    "cert": "/etc/hysteria/cert.crt",
-    "key": "/etc/hysteria/private.key",
-    "masquerade": {
-        "type": "proxy",
-        "proxy": {
-            "url": "https://www.google.com",
-            "rewrite_host": true
-        }
-    },
-    "resolver": {
-        "type": "udp",
-        "tcp": false,
-        "udp": true,
-        "timeout": "10s",
-        "address": "8.8.8.8:53"
-    },
-    "acl": {
-        "inline": [
-            "block(inbound(cidr(\"192.168.0.0/16\")))",
-            "block(inbound(cidr(\"172.16.0.0/12\")))",
-            "block(inbound(cidr(\"10.0.0.0/8\")))"
-        ]
+  "listen": ":$PORT",
+  "tls": {
+    "cert": "/etc/hysteria/server.crt",
+    "key": "/etc/hysteria/server.key"
+  },
+  "obfs": {
+    "type": "salamander",
+    "salamander": {
+      "password": "$OBFS_PASSWORD"
     }
+  },
+  "auth": {
+    "type": "password",
+    "password": "$AUTH_PASSWORD"
+  }
 }
 EOF
-
-# Ahora, vamos a crear un certificado autofirmado para el servidor
-mkdir -p /etc/hysteria
-openssl req -x509 -nodes -newkey rsa:4096 -keyout /etc/hysteria/private.key -out /etc/hysteria/cert.crt -days 365 -subj "/CN=hysteria.local"
-
-# Corregir los permisos
-chmod 644 /etc/hysteria/cert.crt
-chmod 600 /etc/hysteria/private.key
-
-# Actualizar el servicio systemd
-cat > /etc/systemd/system/hysteria.service << EOF
+    # Crear servicio systemd
+    cat > /etc/systemd/system/hysteria.service <<EOF
 [Unit]
-Description=Hysteria Server
+Description=Hysteria VPN Server
 After=network.target
-Wants=network-online.target
-
 [Service]
-Type=simple
-User=root
-WorkingDirectory=/etc/hysteria
 ExecStart=/usr/local/bin/hysteria server -c /etc/hysteria/config.json
 Restart=always
 RestartSec=3
-LimitNOFILE=infinity
-
 [Install]
 WantedBy=multi-user.target
 EOF
-
-    # Configurar firewall
-    if command -v ufw &> /dev/null; then
-        ufw allow "$PORT"/udp
-    elif command -v firewall-cmd &> /dev/null; then
-        firewall-cmd --permanent --add-port="$PORT"/udp
-        firewall-cmd --reload
-    fi
-
-    systemctl daemon-reload
+    # Habilitar e iniciar el servicio
     systemctl enable hysteria
     systemctl start hysteria
-
-    echo -e "${GREEN}Instalación completada exitosamente.${NC}"
-    log_message "Instalación completada"
+    echo -e "${GREEN}Hysteria instalado y configurado exitosamente.${NC}"
     show_config
 }
-
 # Función para verificar e instalar jq
 check_jq() {
     if ! command -v jq >/dev/null 2>&1; then
