@@ -82,11 +82,24 @@ monitor_resources() {
 
 # Función para instalar y configurar Hysteria
 install_hysteria() {
+
+    check_root
+    check_dependencies
+
+    echo -e "${YELLOW}Instalando Hysteria...${NC}"
+    log_message "Iniciando instalación de Hysteria"
+
+    # Verificar instalación previa
+    if [ -f "/usr/local/bin/hysteria" ]; then
+        echo -e "${YELLOW}Hysteria ya está instalado. ¿Desea reinstalar? (s/n)${NC}"
+        read -r reinstall
+        if [ "$reinstall" != "s" ]; then
+            return
+        fi
+        backup_config
+    fi
     echo -e "${YELLOW}Instalando Hysteria...${NC}"
     
-    # Actualizar el sistema e instalar dependencias
-    apt update && apt upgrade -y
-    apt install -y curl wget unzip openssl
     # Descargar e instalar Hysteria
     wget https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64
     chmod +x hysteria-linux-amd64
