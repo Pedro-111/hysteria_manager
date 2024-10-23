@@ -325,118 +325,109 @@ check_monitor_dependencies() {
 }
 monitor_users() {
     # Verificar dependencias primero
-    if ! check_monitor_dependencies; then
-        echo -e "${RED}No se puede iniciar el monitor sin las dependencias necesarias.${NC}"
+    if ! command -v journalctl >/dev/null 2>&1; then
+        echo -e "${RED}journalctl no está disponible. Por favor, instale systemd.${NC}"
         return 1
     fi
 
     echo -e "${YELLOW}=== Monitor de Usuarios de Hysteria ===${NC}"
     
-    # Obtener el puerto del archivo de configuración
-    local port
-    if [ -f "$CONFIG_FILE" ]; then
-        port=$(jq -r '.listen' "$CONFIG_FILE" 2>/dev/null | grep -oP '\d+' || echo "36712")
-    else
-        echo -e "${RED}No se encontró el archivo de configuración${NC}"
-        return
-    fi
+    # Capturar Ctrl+C
+    trap 'echo -e "\n${GREEN}Saliendo del monitor...${NC}"; exit' SIGINT
 
-    # Capturar Ctrl+C y tecla 0
-    trap 'echo -e "\n${GREEN}Saliendo del monitor...${NC}"; return' SIGINT
-
-    while true; do
+    # Función para limpiar la pantalla y mostrar el encabezado
+    show_header() {
         clear
         echo -e "${YELLOW}=== Monitor de Usuarios de Hysteria ===${NC}"
-        echo -e "${BLUE}Actualizando cada 3 segundos...${NC}"
+        echo -e "${BLUE}Monitoreando conexiones en tiempo real...${NC}"
         echo -e "${PURPLE}Fecha y hora: ${NC}$(date '+%Y-%m-%d %H:%M:%S')"
-        echo -e "${YELLOW}Presione '0' y Enter para salir${NC}"
-        
-        # Mostrar estado del servicio
+        echo -e "${YELLOW}Presione Ctrl+C para salir${NC}\n"
+    }
+
+    # Función para mostrar el estado del servicio
+    show_service_status() {
         if systemctl is-active --quiet hysteria; then
             echo -e "${GREEN}Estado del servicio: Activo${NC}"
         else
             echo -e "${RED}Estado del servicio: Inactivo${NC}"
-            break
+            return 1
         fi
+    }
 
-        # Obtener y mostrar conexiones
+    # Array para almacenar las conexiones activas
+    declare -A active_connections
+
+    show_header
+    show_service_status
+
+    echo -e "\n${BLUE}Conexiones activas:${NC}"
+    echo "╔════════════════════╦═══════════════╦══════════════════╗"
+    echo "║ IP Cliente         ║ Puerto        ║ Tiempo Conectado ║"
+    echo "╠════════════════════╬═══════════════╬══════════════════╣"
+
+    # Función para procesar cada línea del log
+    process_log_line() {
+        local line="$1"
+        if [[ $line =~ "client connected" ]]; then
+            # Extraer IP y puerto del mensaje de conexión
+            local addr=$(echo "$line" | grep -oP '(?<="addr": ")[^"]*')
+            local ip=$(echo "$addr" | cut -d: -f1)
+            local port=$(echo "$addr" | cut -d: -f2)
+            local timestamp=$(echo "$line" | grep -oP '\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}')
+            
+            # Guardar la conexión en el array asociativo
+            active_connections["$addr"]="$timestamp"
+            
+            # Calcular tiempo conectado
+            local now=$(date +%s)
+            local conn_time=$(date -d "$timestamp" +%s)
+            local duration=$((now - conn_time))
+            local duration_str=$(printf '%02d:%02d:%02d' $((duration/3600)) $((duration%3600/60)) $((duration%60)))
+            
+            # Mostrar la nueva conexión
+            printf "║ %-18s ║ %-13s ║ %-16s ║\n" "$ip" "$port" "$duration_str"
+        elif [[ $line =~ "client disconnected" ]]; then
+            # Extraer IP y puerto del mensaje de desconexión
+            local addr=$(echo "$line" | grep -oP '(?<="addr": ")[^"]*')
+            # Eliminar la conexión del array
+            unset active_connections["$addr"]
+        fi
+    }
+
+    # Mostrar conexiones existentes desde el inicio del servicio
+    journalctl -u hysteria -n 1000 --no-pager | while read -r line; do
+        process_log_line "$line"
+    done
+
+    echo "╚════════════════════╩═══════════════╩══════════════════╝"
+
+    # Monitorear nuevas conexiones en tiempo real
+    journalctl -u hysteria -f | while read -r line; do
+        show_header
+        show_service_status
         echo -e "\n${BLUE}Conexiones activas:${NC}"
-        echo "╔════════════════════╦═══════════════╦══════════╦═══════════════╗"
-        echo "║ IP Pública         ║ Puerto        ║ Estado   ║ IP Local      ║"
-        echo "╠════════════════════╬═══════════════╬══════════╬═══════════════╣"
-
-        local connections_found=false
-        local total_conn=0
-
-        # Obtener IPs usando netstat
-        while read -r line; do
-            if [[ $line =~ [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-                local remote_ip=$(echo "$line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+' | head -1)
-                local local_ip=$(echo "$line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+' | tail -1)
-                
-                if [ ! -z "$remote_ip" ] && [ ! -z "$local_ip" ]; then
-                    local ip=$(echo "$remote_ip" | cut -d: -f1)
-                    local port=$(echo "$remote_ip" | cut -d: -f2)
-                    local lip=$(echo "$local_ip" | cut -d: -f1)
-                    printf "║ %-18s ║ %-13s ║ %-8s ║ %-13s ║\n" "$ip" "$port" "ACTIVE" "$lip"
-                    connections_found=true
-                    ((total_conn++))
-                fi
-            fi
-        done < <(netstat -anpu 2>/dev/null | grep "hysteria")
-
-        # Si netstat no encuentra nada, intentar con ss
-        if [ "$connections_found" = false ]; then
-            while read -r line; do
-                if [[ $line =~ [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-                    local remote_ip=$(echo "$line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+' | head -1)
-                    local local_ip=$(echo "$line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+' | tail -1)
-                    
-                    if [ ! -z "$remote_ip" ] && [ ! -z "$local_ip" ]; then
-                        local ip=$(echo "$remote_ip" | cut -d: -f1)
-                        local port=$(echo "$remote_ip" | cut -d: -f2)
-                        local lip=$(echo "$local_ip" | cut -d: -f1)
-                        printf "║ %-18s ║ %-13s ║ %-8s ║ %-13s ║\n" "$ip" "$port" "ACTIVE" "$lip"
-                        connections_found=true
-                        ((total_conn++))
-                    fi
-                fi
-            done < <(ss -anpu 2>/dev/null | grep "hysteria")
-        fi
-
-        echo "╚════════════════════╩═══════════════╩══════════╩═══════════════╝"
-        echo -e "\n${GREEN}Total de conexiones: $total_conn${NC}"
-
-        # Mostrar uso de recursos - Versión corregida
-        echo -e "\n${BLUE}Uso de recursos:${NC}"
-        if pid=$(pgrep -f "hysteria" | head -1); then
-            if [ ! -z "$pid" ]; then
-                # Usar top en modo batch para una sola lectura
-                local stats=$(top -b -n 1 -p "$pid" | grep hysteria)
-                if [ ! -z "$stats" ]; then
-                    local cpu=$(echo "$stats" | awk '{print $9}')
-                    local mem=$(echo "$stats" | awk '{print $10}')
-                    local uptime=$(ps -p "$pid" -o etime= 2>/dev/null || echo "N/A")
-                    
-                    echo -e "CPU: ${GREEN}${cpu}%${NC}"
-                    echo -e "Memoria: ${GREEN}${mem}%${NC}"
-                    echo -e "Tiempo activo: ${GREEN}${uptime}${NC}"
-                else
-                    echo -e "${RED}No se pudo obtener estadísticas del proceso${NC}"
-                fi
-            else
-                echo -e "${RED}No se pudo obtener información del proceso${NC}"
-            fi
-        else
-            echo -e "${RED}Proceso hysteria no encontrado${NC}"
-        fi
-
-        # Leer input con timeout
-        read -t 3 -n 1 input
-        if [ "$input" = "0" ]; then
-            echo -e "\n${GREEN}Saliendo del monitor...${NC}"
-            break
-        fi
+        echo "╔════════════════════╦═══════════════╦══════════════════╗"
+        echo "║ IP Cliente         ║ Puerto        ║ Tiempo Conectado ║"
+        echo "╠════════════════════╬═══════════════╬══════════════════╣"
+        
+        process_log_line "$line"
+        
+        # Mostrar todas las conexiones activas actualizadas
+        for addr in "${!active_connections[@]}"; do
+            local ip=$(echo "$addr" | cut -d: -f1)
+            local port=$(echo "$addr" | cut -d: -f2)
+            local timestamp="${active_connections[$addr]}"
+            
+            local now=$(date +%s)
+            local conn_time=$(date -d "$timestamp" +%s)
+            local duration=$((now - conn_time))
+            local duration_str=$(printf '%02d:%02d:%02d' $((duration/3600)) $((duration%3600/60)) $((duration%60)))
+            
+            printf "║ %-18s ║ %-13s ║ %-16s ║\n" "$ip" "$port" "$duration_str"
+        done
+        
+        echo "╚════════════════════╩═══════════════╩══════════════════╝"
+        echo -e "\n${GREEN}Total de conexiones activas: ${#active_connections[@]}${NC}"
     done
 }
 change_passwords() {
