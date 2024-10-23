@@ -323,13 +323,12 @@ check_monitor_dependencies() {
     echo -e "${GREEN}Todas las dependencias están instaladas.${NC}"
     return 0
 }
-
 monitor_users() {
     # Verificar dependencias primero
     if ! check_monitor_dependencies; then
         echo -e "${RED}No se puede iniciar el monitor sin las dependencias necesarias.${NC}"
         return 1
-    fi
+    }
 
     echo -e "${YELLOW}=== Monitor de Usuarios de Hysteria ===${NC}"
     
@@ -362,61 +361,66 @@ monitor_users() {
 
         # Obtener y mostrar conexiones
         echo -e "\n${BLUE}Conexiones activas:${NC}"
-        echo "╔════════════════════╦═══════════════╦════════════╗"
-        echo "║ IP Remota          ║ Puerto Remoto ║ Estado     ║"
-        echo "╠════════════════════╬═══════════════╬════════════╣"
+        echo "╔════════════════════╦═══════════════╦══════════╦═══════════════╗"
+        echo "║ IP Pública         ║ Puerto        ║ Estado   ║ IP Local      ║"
+        echo "╠════════════════════╬═══════════════╬══════════╬═══════════════╣"
 
         local connections_found=false
-
-        # Intentar primero con ss
-        if command -v ss >/dev/null 2>&1; then
-            while read -r line; do
-                if [ ! -z "$line" ]; then
-                    remote_addr=$(echo "$line" | awk '{print $6}')
-                    ip=$(echo "$remote_addr" | cut -d: -f1)
-                    remote_port=$(echo "$remote_addr" | cut -d: -f2)
-                    printf "║ %-18s ║ %-13s ║ %-10s ║\n" "$ip" "$remote_port" "ACTIVE"
-                    connections_found=true
-                fi
-            done < <(ss -nu state connected sport :"$port" | grep -v "UNCONN" | tail -n +2)
-        fi
-
-        # Si ss no encontró conexiones, intentar con lsof
-        if [ "$connections_found" = false ] && command -v lsof >/dev/null 2>&1; then
-            while read -r line; do
-                remote_addr=$(echo "$line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+')
-                if [ ! -z "$remote_addr" ]; then
-                    ip=$(echo "$remote_addr" | cut -d: -f1)
-                    remote_port=$(echo "$remote_addr" | cut -d: -f2)
-                    printf "║ %-18s ║ %-13s ║ %-10s ║\n" "$ip" "$remote_port" "ACTIVE"
-                    connections_found=true
-                fi
-            done < <(lsof -i UDP:"$port" -n | grep "hysteria")
-        fi
-
-        echo "╚════════════════════╩═══════════════╩════════════╝"
-
-        # Contar conexiones
         local total_conn=0
-        if command -v ss >/dev/null 2>&1; then
-            total_conn=$(ss -nu state connected sport :"$port" | grep -v "UNCONN" | wc -l)
-            total_conn=$((total_conn-1))  # Restar la línea de encabezado
-        elif command -v lsof >/dev/null 2>&1; then
-            total_conn=$(lsof -i UDP:"$port" -n | grep "hysteria" | wc -l)
+
+        # Obtener IPs usando netstat
+        while read -r line; do
+            if [[ $line =~ [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+                local remote_ip=$(echo "$line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+' | head -1)
+                local local_ip=$(echo "$line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+' | tail -1)
+                
+                if [ ! -z "$remote_ip" ] && [ ! -z "$local_ip" ]; then
+                    local ip=$(echo "$remote_ip" | cut -d: -f1)
+                    local port=$(echo "$remote_ip" | cut -d: -f2)
+                    local lip=$(echo "$local_ip" | cut -d: -f1)
+                    printf "║ %-18s ║ %-13s ║ %-8s ║ %-13s ║\n" "$ip" "$port" "ACTIVE" "$lip"
+                    connections_found=true
+                    ((total_conn++))
+                fi
+            fi
+        done < <(netstat -anpu 2>/dev/null | grep "hysteria")
+
+        # Si netstat no encuentra nada, intentar con ss
+        if [ "$connections_found" = false ]; then
+            while read -r line; do
+                if [[ $line =~ [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+                    local remote_ip=$(echo "$line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+' | head -1)
+                    local local_ip=$(echo "$line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+' | tail -1)
+                    
+                    if [ ! -z "$remote_ip" ] && [ ! -z "$local_ip" ]; then
+                        local ip=$(echo "$remote_ip" | cut -d: -f1)
+                        local port=$(echo "$remote_ip" | cut -d: -f2)
+                        local lip=$(echo "$local_ip" | cut -d: -f1)
+                        printf "║ %-18s ║ %-13s ║ %-8s ║ %-13s ║\n" "$ip" "$port" "ACTIVE" "$lip"
+                        connections_found=true
+                        ((total_conn++))
+                    fi
+                fi
+            done < <(ss -anpu 2>/dev/null | grep "hysteria")
         fi
+
+        echo "╚════════════════════╩═══════════════╩══════════╩═══════════════╝"
         echo -e "\n${GREEN}Total de conexiones: $total_conn${NC}"
 
-        # Mostrar uso de recursos
+        # Mostrar uso de recursos - Versión corregida
         echo -e "\n${BLUE}Uso de recursos:${NC}"
-        if pid=$(pgrep -f hysteria); then
-            local top_info=$(top -b -n 1 -p "$pid" 2>/dev/null | tail -1)
-            local cpu=$(echo "$top_info" | awk '{print $9}')
-            local mem=$(echo "$top_info" | awk '{print $10}')
-            local uptime=$(ps -o etime= -p "$pid" 2>/dev/null)
+        if pid=$(pgrep -f "hysteria"); then
+            # Obtener CPU y memoria usando ps
+            local cpu_mem=$(ps -p $pid -o %cpu,%mem,etime | tail -n 1)
+            local cpu=$(echo $cpu_mem | awk '{print $1}')
+            local mem=$(echo $cpu_mem | awk '{print $2}')
+            local uptime=$(echo $cpu_mem | awk '{print $3}')
             
             echo -e "CPU: ${GREEN}${cpu}%${NC}"
             echo -e "Memoria: ${GREEN}${mem}%${NC}"
             echo -e "Tiempo activo: ${GREEN}${uptime}${NC}"
+        else
+            echo -e "${RED}Proceso hysteria no encontrado${NC}"
         fi
 
         # Leer input con timeout
