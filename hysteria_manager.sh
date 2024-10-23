@@ -412,16 +412,21 @@ monitor_users() {
 
     # Función para procesar cada línea del log
     process_log_line() {
-        local line="$1"
-        if [[ $line =~ "client connected" ]]; then
-            local addr=$(echo "$line" | grep -oP '(?<="addr": ")[^"]*')
-            local timestamp=$(date +%s)
-            active_connections["$addr"]="$timestamp"
-        elif [[ $line =~ "client disconnected" ]]; then
-            local addr=$(echo "$line" | grep -oP '(?<="addr": ")[^"]*')
-            unset active_connections["$addr"]
-        fi
-    }
+    local line="$1"
+    echo "Procesando línea: $line"  # Mensaje de depuración
+
+    if [[ $line =~ "client connected" ]]; then
+        local addr=$(echo "$line" | grep -oP '(?<="addr": ")[^"]*')
+        echo "Conexión establecida: $addr"  # Para verificar la conexión
+        local timestamp=$(date +%s)
+        active_connections["$addr"]="$timestamp"
+    elif [[ $line =~ "client disconnected" ]]; then
+        local addr=$(echo "$line" | grep -oP '(?<="addr": ")[^"]*')
+        echo "Conexión cerrada: $addr"  # Para verificar la desconexión
+        unset active_connections["$addr"]
+    fi
+}
+
 
     # Función para mostrar la tabla de conexiones
     show_connections_table() {
