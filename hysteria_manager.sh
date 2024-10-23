@@ -333,9 +333,6 @@ monitor_users() {
     # Array para almacenar las conexiones activas (usando IP:Puerto como clave única)
     declare -A active_connections
 
-    # Variable para controlar el bucle principal
-    running=true
-
     # Función para obtener el uso de recursos
     get_system_resources() {
         # CPU
@@ -424,31 +421,34 @@ monitor_users() {
         echo -e "\n${GREEN}Total de conexiones activas: ${#active_connections[@]}${NC}"
     }
 
-    # Función para manejar la entrada del usuario
-    check_user_input() {
-        local key
-        read -t 1 -n 1 key
-        if [[ $key == "0" ]]; then
-            running=false
-            echo -e "\n${GREEN}Saliendo del monitor...${NC}"
-            exit 0
-        fi
-    }
-
-    # Capturar Ctrl+C
-    trap 'echo -e "\n${GREEN}Saliendo del monitor...${NC}"; exit' SIGINT
-
-    # Cargar conexiones existentes
+    # Cargar conexiones existentes iniciales
     journalctl -u hysteria -n 1000 --no-pager | while read -r line; do
         process_log_line "$line"
     done
 
-    # Bucle principal
-    while $running; do
+    # Mostrar estado inicial
+    show_header
+    show_connections_table
+
+    # Procesar nuevas líneas del log y actualizar la pantalla
+    journalctl -u hysteria -f -n 0 | while read -r line; do
+        # Procesar la línea del log
+        process_log_line "$line"
+        
+        # Verificar si se presionó 0 (en segundo plano)
+        if read -t 0 -n 1 key; then
+            if [[ $key == "0" ]]; then
+                echo -e "\n${GREEN}Saliendo del monitor...${NC}"
+                return 0
+            fi
+        fi
+        
+        # Actualizar la pantalla
         show_header
         show_connections_table
-        check_user_input
-        sleep 1
+        
+        # Pequeña pausa para no sobrecargar el CPU
+        sleep 0.5
     done
 }
 change_passwords() {
