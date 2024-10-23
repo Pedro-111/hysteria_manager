@@ -271,7 +271,7 @@ change_passwords() {
     if [ ! -f "$CONFIG_FILE" ]; then
         echo -e "${RED}Hysteria no está instalado o configurado.${NC}"
         return
-    fi
+    }
 
     backup_config
 
@@ -280,11 +280,11 @@ change_passwords() {
     read -p "Nueva contraseña de autenticación (dejar en blanco para generar aleatoriamente): " NEW_AUTH_PASSWORD
     NEW_AUTH_PASSWORD=${NEW_AUTH_PASSWORD:-$(generate_password)}
 
-    # Usar jq para actualizar el archivo de configuración
+    # Usar jq para actualizar el archivo de configuración con la estructura correcta
     local temp_config
     temp_config=$(mktemp)
     jq --arg obfs "$NEW_OBFS_PASSWORD" --arg auth "$NEW_AUTH_PASSWORD" \
-        '.obfs.password = $obfs | .auth.password = $auth' "$CONFIG_FILE" > "$temp_config"
+        '.obfs.salamander.password = $obfs | .auth.password = $auth' "$CONFIG_FILE" > "$temp_config"
     mv "$temp_config" "$CONFIG_FILE"
 
     systemctl restart hysteria
