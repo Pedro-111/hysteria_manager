@@ -102,22 +102,8 @@ install_hysteria() {
     LATEST_VERSION=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep -oP '"tag_name": "\K(.*)(?=")')
     DOWNLOAD_URL="https://github.com/apernet/hysteria/releases/download/${LATEST_VERSION}/hysteria-linux-amd64"
 
-    # Descargar y verificar el ejecutable
     wget -O /usr/local/bin/hysteria "$DOWNLOAD_URL"
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}Error al descargar Hysteria${NC}"
-        log_message "Error: Fallo en la descarga de Hysteria"
-        return 1
-    fi
-
     chmod +x /usr/local/bin/hysteria
-    
-    # Verificar que el ejecutable funciona
-    if ! /usr/local/bin/hysteria -v &>/dev/null; then
-        echo -e "${RED}Error: El ejecutable de Hysteria no funciona correctamente${NC}"
-        log_message "Error: Ejecutable de Hysteria no funcional"
-        return 1
-    }
 
     # Configuración mejorada
     mkdir -p /etc/hysteria
@@ -144,21 +130,15 @@ install_hysteria() {
         DOWNLOAD_SPEED=${custom_download:-$DOWNLOAD_SPEED}
     fi
 
-    # Crear configuración con formato corregido
+    # Crear configuración del servidor
     cat > "$CONFIG_FILE" << EOF
 {
     "listen": ":$PORT",
     "protocol": "udp",
     "up_mbps": $UPLOAD_SPEED,
     "down_mbps": $DOWNLOAD_SPEED,
-    "obfs": {
-        "type": "salamander",
-        "password": "$OBFS_PASSWORD"
-    },
-    "auth": {
-        "type": "password",
-        "password": "$AUTH_PASSWORD"
-    },
+    "obfs": "salamander:$OBFS_PASSWORD",
+    "auth": "$AUTH_PASSWORD",
     "masquerade": {
         "type": "proxy",
         "proxy": {
@@ -180,18 +160,32 @@ install_hysteria() {
 }
 EOF
 
+    # Crear configuración de cliente
+    mkdir -p /etc/hysteria/client
+    cat > "/etc/hysteria/client/config.json" << EOF
+{
+    "server": "$PUBLIC_IP:$PORT",
+    "protocol": "udp",
+    "up_mbps": $UPLOAD_SPEED,
+    "down_mbps": $DOWNLOAD_SPEED,
+    "obfs": "salamander:$OBFS_PASSWORD",
+    "auth": "$AUTH_PASSWORD",
+    "resolver": {
+        "type": "udp",
+        "servers": ["8.8.8.8:53", "8.8.4.4:53"]
+    },
+    "socks5": {
+        "listen": "127.0.0.1:1080"
+    }
+}
+EOF
+
     # Establecer permisos correctos
     chmod 644 "$CONFIG_FILE"
-    chown root:root "$CONFIG_FILE"
+    chmod 644 "/etc/hysteria/client/config.json"
+    chown -R root:root /etc/hysteria
 
-    # Verificar la configuración
-    if ! /usr/local/bin/hysteria verify -c "$CONFIG_FILE"; then
-        echo -e "${RED}Error: La configuración no es válida${NC}"
-        log_message "Error: Configuración inválida"
-        return 1
-    fi
-
-    # Crear servicio systemd mejorado
+    # Crear servicio systemd
     cat > /etc/systemd/system/hysteria.service << EOF
 [Unit]
 Description=Hysteria Server
@@ -201,7 +195,6 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-ExecStartPre=/usr/local/bin/hysteria verify -c /etc/hysteria/config.json
 ExecStart=/usr/local/bin/hysteria server -c /etc/hysteria/config.json
 Restart=on-failure
 RestartSec=3
@@ -226,25 +219,20 @@ EOF
     # Recargar y habilitar el servicio
     systemctl daemon-reload
     systemctl enable hysteria
-    if ! systemctl start hysteria; then
-        echo -e "${RED}Error al iniciar el servicio. Verificando logs...${NC}"
-        journalctl -u hysteria.service -n 50 --no-pager
-        return 1
-    fi
-
-    # Verificar que el servicio está funcionando
-    sleep 2
-    if ! systemctl is-active hysteria >/dev/null 2>&1; then
-        echo -e "${RED}Error: El servicio no está activo${NC}"
-        log_message "Error: Servicio no activo después de la instalación"
-        return 1
-    fi
+    systemctl start hysteria
 
     echo -e "${GREEN}Instalación completada exitosamente.${NC}"
+    echo -e "${YELLOW}Configuración del servidor en: /etc/hysteria/config.json${NC}"
+    echo -e "${YELLOW}Configuración del cliente en: /etc/hysteria/client/config.json${NC}"
+    
+    # Mostrar información de conexión
+    echo -e "\n${BLUE}Información de conexión:${NC}"
+    echo -e "Servidor: $PUBLIC_IP:$PORT"
+    echo -e "Contraseña de autenticación: $AUTH_PASSWORD"
+    echo -e "Contraseña de ofuscación: $OBFS_PASSWORD"
+    
     log_message "Instalación completada"
-    show_config
 }
-
 # Función para verificar e instalar jq
 check_jq() {
     if ! command -v jq >/dev/null 2>&1; then
