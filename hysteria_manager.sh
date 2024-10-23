@@ -181,25 +181,26 @@ show_config() {
     if [ ! -f "$CONFIG_FILE" ]; then
         echo -e "${RED}Hysteria no está instalado o configurado.${NC}"
         return
-    fi
+    }
     
     # Verificar e instalar jq si es necesario
     check_jq
     
     echo -e "${YELLOW}Obteniendo configuración...${NC}"
     
-    # Intentar obtener valores usando jq, si falla usar método alternativo
+    # Intentar obtener valores usando jq con manejo mejorado de la estructura
     if command -v jq >/dev/null 2>&1; then
         local port=$(jq -r '.listen' "$CONFIG_FILE" 2>/dev/null | grep -oP '\d+' || echo "Error")
-        local upload_mbps=$(jq -r '.up_mbps' "$CONFIG_FILE" 2>/dev/null || echo "Error")
-        local download_mbps=$(jq -r '.down_mbps' "$CONFIG_FILE" 2>/dev/null || echo "Error")
-        local obfs_password=$(jq -r '.obfs.password' "$CONFIG_FILE" 2>/dev/null || echo "Error")
-        local auth_password=$(jq -r '.auth.password' "$CONFIG_FILE" 2>/dev/null || echo "Error")
+        local upload_mbps=$(jq -r '.up_mbps // "100"' "$CONFIG_FILE" 2>/dev/null)
+        local download_mbps=$(jq -r '.down_mbps // "100"' "$CONFIG_FILE" 2>/dev/null)
+        # Manejo específico para la estructura de Salamander
+        local obfs_password=$(jq -r '.obfs.salamander.password // .obfs.password // "Error"' "$CONFIG_FILE" 2>/dev/null)
+        local auth_password=$(jq -r '.auth.password // "Error"' "$CONFIG_FILE" 2>/dev/null)
     else
         # Método alternativo sin jq
         local port=$(grep -o '"listen":"[^"]*"' "$CONFIG_FILE" | cut -d'"' -f4 | grep -oP '\d+' || echo "Error")
-        local upload_mbps=$(get_config_value "$CONFIG_FILE" "up_mbps")
-        local download_mbps=$(get_config_value "$CONFIG_FILE" "down_mbps")
+        local upload_mbps="100"
+        local download_mbps="100"
         local obfs_password=$(grep -o '"password":"[^"]*"' "$CONFIG_FILE" | head -1 | cut -d'"' -f4 || echo "Error")
         local auth_password=$(grep -o '"password":"[^"]*"' "$CONFIG_FILE" | tail -1 | cut -d'"' -f4 || echo "Error")
     fi
