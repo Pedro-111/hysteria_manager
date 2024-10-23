@@ -328,7 +328,7 @@ monitor_users() {
     if ! command -v journalctl >/dev/null 2>&1; then
         echo -e "${RED}journalctl no está disponible. Por favor, instale systemd.${NC}"
         return 1
-    }
+    fi
 
     # Array para almacenar las conexiones activas (usando IP:Puerto como clave única)
     declare -A active_connections
