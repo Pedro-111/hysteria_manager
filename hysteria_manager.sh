@@ -422,48 +422,39 @@ monitor_users() {
         echo -e "\n${GREEN}Total de conexiones activas: ${#active_connections[@]}${NC}"
     }
 
-    # Variable para controlar el bucle de monitoreo
-    local monitoring=true
-
-    # Crear un named pipe para la entrada del usuario
-    local pipe="/tmp/monitor_pipe"
-    mkfifo "$pipe" 2>/dev/null
-    exec 3<>"$pipe"
-    rm "$pipe"
-
-    # Iniciar lectura de entrada en segundo plano
-    {
-        while $monitoring; do
-            read -n 1 key
-            if [[ "$key" == "0" ]]; then
-                monitoring=false
-                # Matar el proceso de journalctl
-                pkill -f "journalctl -u hysteria -f"
-                break
-            fi
-        done
-    } <&3 &
-
-    # Cargar conexiones existentes
+    # Inicializar el monitor
     show_header
+    
+    # Cargar conexiones existentes iniciales
     journalctl -u hysteria -n 1000 --no-pager | while read -r line; do
         process_log_line "$line"
     done
     show_connections_table
 
-    # Monitorear nuevas conexiones en tiempo real
-    while $monitoring; do
-        journalctl -u hysteria -f | while $monitoring && read -r line; do
+    # Usar coproc para journalctl
+    coproc LOGGER { journalctl -u hysteria -f; }
+
+    # Bucle principal con lectura de tecla y procesamiento de logs
+    while true; do
+        # Configurar lectura no bloqueante
+        read -t 0.1 -n 1 key
+        if [[ "$key" == "0" ]]; then
+            kill $LOGGER_PID 2>/dev/null
+            echo -e "\n${GREEN}Saliendo del monitor...${NC}"
+            break
+        fi
+
+        # Leer y procesar logs si hay disponibles
+        if read -t 0.1 -u ${LOGGER[0]} line; then
             process_log_line "$line"
             show_header
             show_connections_table
-        done
-        [ "$monitoring" = false ] && break
+        fi
     done
 
-    # Limpiar y salir
-    exec 3>&-
-    echo -e "\n${GREEN}Monitor finalizado exitosamente${NC}"
+    # Limpiar
+    kill $LOGGER_PID 2>/dev/null
+    wait $LOGGER_PID 2>/dev/null
     return 0
 }
 change_passwords() {
