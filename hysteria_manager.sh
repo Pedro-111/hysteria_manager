@@ -430,30 +430,32 @@ monitor_users() {
 
     # Función para mostrar la tabla de conexiones
     show_connections_table() {
-        local now=$(date +%s)
-        echo -e "\n${BLUE}Conexiones activas:${NC}"
-        echo "╔════════════════════╦═══════════════╦══════════════════╗"
-        echo "║ IP Cliente         ║ Puerto        ║ Tiempo Conectado ║"
-        echo "╠════════════════════╬═══════════════╬══════════════════╣"
-        
-        if [ ${#active_connections[@]} -eq 0 ]; then
-            echo "║      No hay conexiones activas actualmente      ║"
-        else
-            for addr in "${!active_connections[@]}"; do
-                local ip=$(echo "$addr" | cut -d: -f1)
-                local port=$(echo "$addr" | cut -d: -f2)
-                local conn_time=${active_connections[$addr]}
-                
-                local duration=$((now - conn_time))
-                local duration_str=$(printf '%02d:%02d:%02d' $((duration/3600)) $((duration%3600/60)) $((duration%60)))
-                
-                printf "║ %-18s ║ %-13s ║ %-16s ║\n" "$ip" "$port" "$duration_str"
-            done
-        fi
-        
-        echo "╚════════════════════╩═══════════════╩══════════════════╝"
-        echo -e "\n${GREEN}Total de conexiones activas: ${#active_connections[@]}${NC}"
-    }
+    local now=$(date +%s)
+    echo -e "\n${BLUE}Conexiones activas:${NC}"
+    echo "╔════════════════════╦═══════════════╦══════════════════╗"
+    echo "║ IP Cliente         ║ Puerto        ║ Tiempo Conectado ║"
+    echo "╠════════════════════╬═══════════════╬══════════════════╣"
+
+    if [ ${#active_connections[@]} -eq 0 ]; then
+        echo "║      No hay conexiones activas actualmente      ║"
+    else
+        for addr in "${!active_connections[@]}"; do
+            echo "Dirección activa: $addr"  # Para verificar direcciones
+            local ip=$(echo "$addr" | cut -d: -f1)
+            local port=$(echo "$addr" | cut -d: -f2)
+            local conn_time=${active_connections[$addr]}
+            
+            local duration=$((now - conn_time))
+            local duration_str=$(printf '%02d:%02d:%02d' $((duration/3600)) $((duration%3600/60)) $((duration%60)))
+            
+            printf "║ %-18s ║ %-13s ║ %-16s ║\n" "$ip" "$port" "$duration_str"
+        done
+    fi
+    
+    echo "╚════════════════════╩═══════════════╩══════════════════╝"
+    echo -e "\n${GREEN}Total de conexiones activas: ${#active_connections[@]}${NC}"
+}
+
 
     # Cargar conexiones existentes iniciales
     journalctl -u hysteria -n 1000 --no-pager | while read -r line; do
