@@ -328,7 +328,7 @@ monitor_users() {
     if ! check_monitor_dependencies; then
         echo -e "${RED}No se puede iniciar el monitor sin las dependencias necesarias.${NC}"
         return 1
-    }
+    fi
 
     echo -e "${YELLOW}=== Monitor de Usuarios de Hysteria ===${NC}"
     
