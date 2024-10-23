@@ -409,16 +409,24 @@ monitor_users() {
 
         # Mostrar uso de recursos - Versión corregida
         echo -e "\n${BLUE}Uso de recursos:${NC}"
-        if pid=$(pgrep -f "hysteria"); then
-            # Obtener CPU y memoria usando ps
-            local cpu_mem=$(ps -p $pid -o %cpu,%mem,etime | tail -n 1)
-            local cpu=$(echo $cpu_mem | awk '{print $1}')
-            local mem=$(echo $cpu_mem | awk '{print $2}')
-            local uptime=$(echo $cpu_mem | awk '{print $3}')
-            
-            echo -e "CPU: ${GREEN}${cpu}%${NC}"
-            echo -e "Memoria: ${GREEN}${mem}%${NC}"
-            echo -e "Tiempo activo: ${GREEN}${uptime}${NC}"
+        if pid=$(pgrep -f "hysteria" | head -1); then
+            if [ ! -z "$pid" ]; then
+                # Usar top en modo batch para una sola lectura
+                local stats=$(top -b -n 1 -p "$pid" | grep hysteria)
+                if [ ! -z "$stats" ]; then
+                    local cpu=$(echo "$stats" | awk '{print $9}')
+                    local mem=$(echo "$stats" | awk '{print $10}')
+                    local uptime=$(ps -p "$pid" -o etime= 2>/dev/null || echo "N/A")
+                    
+                    echo -e "CPU: ${GREEN}${cpu}%${NC}"
+                    echo -e "Memoria: ${GREEN}${mem}%${NC}"
+                    echo -e "Tiempo activo: ${GREEN}${uptime}${NC}"
+                else
+                    echo -e "${RED}No se pudo obtener estadísticas del proceso${NC}"
+                fi
+            else
+                echo -e "${RED}No se pudo obtener información del proceso${NC}"
+            fi
         else
             echo -e "${RED}Proceso hysteria no encontrado${NC}"
         fi
