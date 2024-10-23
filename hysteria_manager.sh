@@ -266,7 +266,88 @@ show_config() {
         echo -e "${RED}No se pueden obtener estadísticas de conexión (netstat/ss no disponible)${NC}"
     fi
 }
+# Nueva función para monitorear usuarios
+monitor_users() {
+    echo -e "${YELLOW}=== Monitor de Usuarios de Hysteria ===${NC}"
+    
+    # Obtener el puerto del archivo de configuración
+    local port
+    if [ -f "$CONFIG_FILE" ]; then
+        port=$(jq -r '.listen' "$CONFIG_FILE" 2>/dev/null | grep -oP '\d+' || echo "36712")
+    else
+        echo -e "${RED}No se encontró el archivo de configuración${NC}"
+        return
+    fi
 
+    while true; do
+        clear
+        echo -e "${YELLOW}=== Monitor de Usuarios de Hysteria ===${NC}"
+        echo -e "${BLUE}Actualizando cada 3 segundos... (Presiona Ctrl+C para salir)${NC}"
+        echo -e "${PURPLE}Fecha y hora: ${NC}$(date '+%Y-%m-%d %H:%M:%S')"
+        
+        # Mostrar estado del servicio
+        if systemctl is-active --quiet hysteria; then
+            echo -e "${GREEN}Estado del servicio: Activo${NC}"
+        else
+            echo -e "${RED}Estado del servicio: Inactivo${NC}"
+            break
+        fi
+
+        # Obtener y mostrar conexiones
+        echo -e "\n${BLUE}Conexiones activas:${NC}"
+        if command -v netstat >/dev/null 2>&1; then
+            echo "╔════════════════════╦═══════════════╦════════════╗"
+            echo "║ IP Remota          ║ Puerto Remoto ║ Estado     ║"
+            echo "╠════════════════════╬═══════════════╬════════════╣"
+            netstat -anpu | grep :$port | grep ESTABLISHED | \
+            while read -r line; do
+                remote_addr=$(echo $line | awk '{print $5}')
+                ip=$(echo $remote_addr | cut -d: -f1)
+                remote_port=$(echo $remote_addr | cut -d: -f2)
+                state=$(echo $line | awk '{print $6}')
+                printf "║ %-18s ║ %-13s ║ %-10s ║\n" "$ip" "$remote_port" "$state"
+            done
+            echo "╚════════════════════╩═══════════════╩════════════╝"
+            
+            # Mostrar contador de conexiones
+            total_conn=$(netstat -anp | grep :$port | grep ESTABLISHED | wc -l)
+            echo -e "\n${GREEN}Total de conexiones: $total_conn${NC}"
+        elif command -v ss >/dev/null 2>&1; then
+            echo "╔════════════════════╦═══════════════╦════════════╗"
+            echo "║ IP Remota          ║ Puerto Remoto ║ Estado     ║"
+            echo "╠════════════════════╬═══════════════╬════════════╣"
+            ss -anpu | grep :$port | grep ESTAB | \
+            while read -r line; do
+                remote_addr=$(echo $line | awk '{print $6}')
+                ip=$(echo $remote_addr | cut -d: -f1)
+                remote_port=$(echo $remote_addr | cut -d: -f2)
+                state="ESTABLISHED"
+                printf "║ %-18s ║ %-13s ║ %-10s ║\n" "$ip" "$remote_port" "$state"
+            done
+            echo "╚════════════════════╩═══════════════╩════════════╝"
+            
+            # Mostrar contador de conexiones
+            total_conn=$(ss -anp | grep :$port | grep ESTAB | wc -l)
+            echo -e "\n${GREEN}Total de conexiones: $total_conn${NC}"
+        else
+            echo -e "${RED}No se pueden obtener estadísticas (netstat/ss no disponible)${NC}"
+        fi
+
+        # Mostrar uso de recursos
+        echo -e "\n${BLUE}Uso de recursos:${NC}"
+        if pgrep -f hysteria >/dev/null; then
+            pid=$(pgrep -f hysteria)
+            cpu_usage=$(ps -p $pid -o %cpu | tail -n 1)
+            mem_usage=$(ps -p $pid -o %mem | tail -n 1)
+            uptime=$(ps -o etime= -p $pid)
+            echo -e "CPU: ${GREEN}${cpu_usage}%${NC}"
+            echo -e "Memoria: ${GREEN}${mem_usage}%${NC}"
+            echo -e "Tiempo activo: ${GREEN}${uptime}${NC}"
+        fi
+
+        sleep 3
+    done
+}
 change_passwords() {
     if [ ! -f "$CONFIG_FILE" ]; then
         echo -e "${RED}Hysteria no está instalado o configurado.${NC}"
@@ -347,11 +428,12 @@ show_menu() {
     echo -e "${BLUE}5.${NC} Mostrar logs"
     echo -e "${BLUE}6.${NC} Monitorear recursos"
     echo -e "${BLUE}7.${NC} Respaldar configuración"
-    echo -e "${BLUE}8.${NC} Salir"
+    echo -e "${BLUE}8.${NC} Monitor de usuarios en tiempo real"
+    echo -e "${BLUE}9.${NC} Salir"
     echo -e "${YELLOW}===================${NC}"
 }
 
-# Bucle principal
+# Modificar el bucle principal para incluir la nueva opción
 while true; do
     show_menu
     read -p "Seleccione una opción: " choice
@@ -379,6 +461,9 @@ while true; do
             echo -e "${GREEN}Configuración respaldada exitosamente.${NC}"
             ;;
         8)
+            monitor_users
+            ;;
+        9)
             echo -e "${GREEN}Saliendo...${NC}"
             exit 0
             ;;
