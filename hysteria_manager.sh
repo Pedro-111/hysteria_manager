@@ -526,7 +526,62 @@ show_logs() {
         echo -e "${RED}No se encontró el archivo de log.${NC}"
     fi
 }
-
+update_manager() {
+    echo -e "${YELLOW}Verificando actualización del manager...${NC}"
+    
+    # Crear directorio temporal
+    TMP_DIR=$(mktemp -d)
+    cd "$TMP_DIR" || exit 1
+    
+    # Intentar descargar el nuevo script
+    if ! curl -sL "https://raw.githubusercontent.com/Pedro-111/hysteria_manager/develop/hysteria_manager.sh" -o "hysteria_manager.sh.new"; then
+        echo -e "${RED}Error al descargar la actualización.${NC}"
+        rm -rf "$TMP_DIR"
+        return 1
+    fi
+    
+    # Verificar si el archivo se descargó correctamente
+    if [ ! -s "hysteria_manager.sh.new" ]; then
+        echo -e "${RED}El archivo descargado está vacío.${NC}"
+        rm -rf "$TMP_DIR"
+        return 1
+    fi
+    
+    # Obtener la ruta del script actual
+    CURRENT_SCRIPT=$(realpath "$0")
+    
+    # Comparar versiones (puedes implementar una comparación más sofisticada si el script tiene número de versión)
+    if diff -q "hysteria_manager.sh.new" "$CURRENT_SCRIPT" >/dev/null; then
+        echo -e "${GREEN}El manager ya está actualizado a la última versión.${NC}"
+        rm -rf "$TMP_DIR"
+        return 0
+    fi
+    
+    # Hacer backup del script actual
+    cp "$CURRENT_SCRIPT" "$CURRENT_SCRIPT.backup"
+    
+    # Reemplazar el script actual con la nueva versión
+    mv "hysteria_manager.sh.new" "$CURRENT_SCRIPT"
+    chmod +x "$CURRENT_SCRIPT"
+    
+    echo -e "${GREEN}El manager se ha actualizado exitosamente.${NC}"
+    echo -e "${YELLOW}Se ha creado un backup en: ${CURRENT_SCRIPT}.backup${NC}"
+    echo -e "${BLUE}Por favor, reinicie el script para aplicar los cambios.${NC}"
+    
+    # Limpiar
+    rm -rf "$TMP_DIR"
+    
+    # Registrar la actualización
+    log_message "Manager actualizado exitosamente"
+    
+    # Preguntar si desea reiniciar el script
+    echo -e "${YELLOW}¿Desea reiniciar el script ahora? (s/n)${NC}"
+    read -r restart
+    if [ "$restart" = "s" ]; then
+        echo -e "${GREEN}Reiniciando script...${NC}"
+        exec "$CURRENT_SCRIPT"
+    fi
+}
 # Menú principal mejorado
 show_menu() {
     echo -e "\n${YELLOW}=== Menú de Hysteria ===${NC}"
@@ -538,7 +593,8 @@ show_menu() {
     echo -e "${BLUE}6.${NC} Monitorear recursos"
     echo -e "${BLUE}7.${NC} Respaldar configuración"
     echo -e "${BLUE}8.${NC} Monitor de usuarios en tiempo real"
-    echo -e "${BLUE}9.${NC} Salir"
+    echo -e "${BLUE}9.${NC} Actualizar manager"
+    echo -e "${BLUE}10.${NC} Salir"
     echo -e "${YELLOW}===================${NC}"
 }
 
@@ -573,6 +629,9 @@ while true; do
             monitor_users
             ;;
         9)
+            update_manager
+            ;;
+        10)
             echo -e "${GREEN}Saliendo...${NC}"
             exit 0
             ;;
