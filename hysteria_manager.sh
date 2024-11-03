@@ -12,6 +12,11 @@ NC='\033[0m'
 CONFIG_FILE="/etc/hysteria/config.json"
 BACKUP_DIR="/etc/hysteria/backups"
 LOG_FILE="/var/log/hysteria_manager.log"
+# Directorio para almacenar los datos de consumo
+USAGE_DIR="/var/lib/hysteria/usage"
+USAGE_DB="/var/lib/hysteria/usage/ip_usage.db"
+TEMP_USAGE="/var/lib/hysteria/usage/temp_usage.db"
+
 
 # Función para logging
 log_message() {
@@ -45,20 +50,265 @@ generate_password() {
 
 # Función para verificar dependencias
 check_dependencies() {
-    local deps=("curl" "wget" "openssl" "jq")
+    echo -e "${YELLOW}Verificando dependencias...${NC}"
+    local deps=(
+        "curl:curl" 
+        "wget:wget" 
+        "openssl:openssl" 
+        "jq:jq"
+        "sqlite3:sqlite3"
+        "bc:bc"
+        "iptables:iptables"
+        "netstat:net-tools"
+    )
     local missing=()
 
     for dep in "${deps[@]}"; do
-        if ! command -v "$dep" &> /dev/null; then
-            missing+=("$dep")
+        IFS=":" read -r cmd pkg <<< "$dep"
+        if ! command -v "$cmd" &> /dev/null; then
+            missing+=("$pkg")
+            echo -e "${YELLOW}Falta: $pkg${NC}"
         fi
     done
 
     if [ ${#missing[@]} -ne 0 ]; then
         echo -e "${YELLOW}Instalando dependencias faltantes: ${missing[*]}${NC}"
-        apt-get update
-        apt-get install -y "${missing[@]}"
+        
+        # Actualizar lista de paquetes
+        if ! apt-get update; then
+            echo -e "${RED}Error al actualizar la lista de paquetes. Intentando continuar...${NC}"
+        fi
+
+        # Intentar instalar cada dependencia por separado
+        for pkg in "${missing[@]}"; do
+            echo -e "${BLUE}Instalando $pkg...${NC}"
+            if apt-get install -y "$pkg"; then
+                echo -e "${GREEN}$pkg instalado correctamente${NC}"
+            else
+                echo -e "${RED}Error al instalar $pkg${NC}"
+                return 1
+            fi
+        done
     fi
+
+    # Verificar instalación de SQLite y crear directorio de base de datos si es necesario
+    if command -v sqlite3 &> /dev/null; then
+        # Verificar si el directorio de la base de datos existe
+        if [ ! -d "/var/lib/hysteria" ]; then
+            echo -e "${YELLOW}Creando directorio para la base de datos...${NC}"
+            mkdir -p /var/lib/hysteria/usage
+            chmod 755 /var/lib/hysteria
+            chmod 755 /var/lib/hysteria/usage
+        fi
+        
+        # Verificar si se puede escribir en el directorio
+        if ! touch "/var/lib/hysteria/test_write" &> /dev/null; then
+            echo -e "${RED}Error: No se puede escribir en el directorio de la base de datos${NC}"
+            return 1
+        else
+            rm "/var/lib/hysteria/test_write"
+        fi
+    fi
+
+    # Verificar si iptables está funcionando correctamente
+    if command -v iptables &> /dev/null; then
+        if ! iptables -L &> /dev/null; then
+            echo -e "${RED}Error: iptables está instalado pero no funciona correctamente${NC}"
+            return 1
+        fi
+    fi
+
+    # Verificar si netstat está funcionando
+    if command -v netstat &> /dev/null; then
+        if ! netstat -version &> /dev/null && ! netstat --version &> /dev/null; then
+            echo -e "${RED}Error: netstat está instalado pero no funciona correctamente${NC}"
+            return 1
+        fi
+    fi
+
+    echo -e "${GREEN}Todas las dependencias están instaladas y funcionando correctamente${NC}"
+    return 0
+}
+# Función para inicializar el sistema de seguimiento
+init_usage_tracking() {
+    # Crear directorio si no existe
+    mkdir -p "$USAGE_DIR"
+    
+    # Crear base de datos SQLite si no existe
+    if [ ! -f "$USAGE_DB" ]; then
+        sqlite3 "$USAGE_DB" <<EOF
+CREATE TABLE ip_usage (
+    ip TEXT,
+    timestamp INTEGER,
+    bytes_up INTEGER,
+    bytes_down INTEGER,
+    PRIMARY KEY (ip, timestamp)
+);
+
+CREATE TABLE daily_usage (
+    ip TEXT,
+    date TEXT,
+    total_bytes_up INTEGER,
+    total_bytes_down INTEGER,
+    PRIMARY KEY (ip, date)
+);
+
+CREATE INDEX idx_timestamp ON ip_usage(timestamp);
+CREATE INDEX idx_ip ON ip_usage(ip);
+EOF
+    fi
+}
+
+# Función para convertir bytes a unidad legible
+format_bytes() {
+    local bytes=$1
+    local units=("B" "KB" "MB" "GB" "TB" "PB")
+    local unit=0
+    
+    while [ $bytes -ge 1024 ] && [ $unit -lt 5 ]; do
+        bytes=$(echo "scale=2; $bytes/1024" | bc)
+        ((unit++))
+    done
+    
+    printf "%.2f %s" $bytes "${units[$unit]}"
+}
+
+# Función para registrar el uso actual
+record_current_usage() {
+    local ip=$1
+    local bytes_up=$2
+    local bytes_down=$3
+    local timestamp=$(date +%s)
+    
+    sqlite3 "$USAGE_DB" <<EOF
+INSERT OR REPLACE INTO ip_usage (ip, timestamp, bytes_up, bytes_down)
+VALUES ('$ip', $timestamp, $bytes_up, $bytes_down);
+
+INSERT OR REPLACE INTO daily_usage (ip, date, total_bytes_up, total_bytes_down)
+VALUES (
+    '$ip',
+    date('now'),
+    $bytes_up,
+    $bytes_down
+)
+ON CONFLICT(ip, date) DO UPDATE SET
+    total_bytes_up = total_bytes_up + excluded.total_bytes_up,
+    total_bytes_down = total_bytes_down + excluded.total_bytes_down;
+EOF
+}
+
+# Función para limpiar registros antiguos (mantener solo 5 días)
+cleanup_old_records() {
+    local cutoff_date=$(date -d "5 days ago" +%s)
+    
+    sqlite3 "$USAGE_DB" <<EOF
+DELETE FROM ip_usage WHERE timestamp < $cutoff_date;
+DELETE FROM daily_usage WHERE date < date('now', '-5 days');
+VACUUM;
+EOF
+}
+
+# Función para obtener el consumo histórico
+get_historical_usage() {
+    local result
+    result=$(sqlite3 -header -column "$USAGE_DB" <<EOF
+SELECT 
+    ip,
+    date,
+    total_bytes_up,
+    total_bytes_down,
+    (total_bytes_up + total_bytes_down) as total_bytes
+FROM daily_usage 
+WHERE date >= date('now', '-5 days')
+ORDER BY date DESC, total_bytes DESC;
+EOF
+)
+    echo "$result"
+}
+
+# Función para mostrar el historial de consumo
+show_usage_history() {
+    echo -e "${YELLOW}=== Historial de Consumo (Últimos 5 días) ===${NC}"
+    echo -e "${BLUE}Fecha actual: $(date '+%Y-%m-%d %H:%M:%S')${NC}\n"
+
+    # Obtener y mostrar estadísticas
+    echo -e "╔════════════════╦════════════╦════════════════╦════════════════╦════════════════╗"
+    echo -e "║      IP        ║   Fecha    ║    Subida      ║    Bajada      ║     Total      ║"
+    echo -e "╠════════════════╬════════════╬════════════════╬════════════════╬════════════════╣"
+    
+    local IFS=$'\n'
+    local first_line=true
+    
+    while IFS='|' read -r ip date up down total; do
+        # Saltar la línea de encabezado
+        if [ "$first_line" = true ]; then
+            first_line=false
+            continue
+        fi
+        
+        # Formatear los valores
+        local formatted_up=$(format_bytes $up)
+        local formatted_down=$(format_bytes $down)
+        local formatted_total=$(format_bytes $total)
+        
+        printf "║ %-14s ║ %-10s ║ %-14s ║ %-14s ║ %-14s ║\n" \
+               "$ip" "$date" "$formatted_up" "$formatted_down" "$formatted_total"
+    done < <(get_historical_usage)
+    
+    echo -e "╚════════════════╩════════════╩════════════════╩════════════════╩════════════════╝"
+}
+
+# Función para monitorear el tráfico actual usando iptables
+monitor_current_traffic() {
+    # Verificar si iptables está instalado
+    if ! command -v iptables >/dev/null 2>&1; then
+        echo -e "${RED}iptables no está instalado. Instalando...${NC}"
+        apt-get update && apt-get install -y iptables
+    fi
+    
+    # Crear reglas de iptables si no existen
+    iptables -N HYSTERIA_TRACKING 2>/dev/null || true
+    iptables -F HYSTERIA_TRACKING
+    
+    # Obtener puerto de Hysteria
+    local port=$(jq -r '.listen' "$CONFIG_FILE" 2>/dev/null | grep -oP '\d+' || echo "36712")
+    
+    # Agregar reglas para el seguimiento
+    iptables -A HYSTERIA_TRACKING -p udp --dport $port
+    iptables -A HYSTERIA_TRACKING -p udp --sport $port
+    
+    # Insertar la cadena en INPUT y OUTPUT si no existe
+    iptables -C INPUT -j HYSTERIA_TRACKING 2>/dev/null || \
+        iptables -I INPUT -j HYSTERIA_TRACKING
+    iptables -C OUTPUT -j HYSTERIA_TRACKING 2>/dev/null || \
+        iptables -I OUTPUT -j HYSTERIA_TRACKING
+}
+
+# Función principal de monitoreo
+start_usage_monitoring() {
+    init_usage_tracking
+    monitor_current_traffic
+    
+    while true; do
+        # Obtener conexiones actuales y su tráfico
+        local connections=$(netstat -ntu | grep :$port | awk '{print $5}' | cut -d: -f1 | sort | uniq)
+        
+        for ip in $connections; do
+            # Obtener bytes actuales
+            local bytes_up=$(iptables -nvx -L HYSTERIA_TRACKING | grep $ip | awk '$3=="udp" {sum+=$2} END {print sum}')
+            local bytes_down=$(iptables -nvx -L HYSTERIA_TRACKING | grep $ip | awk '$3=="udp" {sum+=$2} END {print sum}')
+            
+            # Registrar uso
+            record_current_usage "$ip" "${bytes_up:-0}" "${bytes_down:-0}"
+        done
+        
+        # Limpiar registros antiguos cada día
+        if [ "$(date +%H:%M)" = "00:00" ]; then
+            cleanup_old_records
+        fi
+        
+        sleep 60  # Actualizar cada minuto
+    done
 }
 
 # Función para obtener IP
@@ -594,7 +844,8 @@ show_menu() {
     echo -e "${BLUE}7.${NC} Respaldar configuración"
     echo -e "${BLUE}8.${NC} Monitor de usuarios en tiempo real"
     echo -e "${BLUE}9.${NC} Actualizar manager"
-    echo -e "${BLUE}10.${NC} Salir"
+    echo -e "${BLUE}10.${NC} Ver historial de consumo"
+    echo -e "${BLUE}0.${NC} Salir"
     echo -e "${YELLOW}===================${NC}"
 }
 
@@ -632,6 +883,9 @@ while true; do
             update_manager
             ;;
         10)
+            show_usage_history
+            ;;
+        0)
             echo -e "${GREEN}Saliendo...${NC}"
             exit 0
             ;;
