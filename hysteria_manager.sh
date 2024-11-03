@@ -136,8 +136,9 @@ init_usage_tracking() {
     
     # Crear base de datos SQLite si no existe
     if [ ! -f "$USAGE_DB" ]; then
+        echo "Creando base de datos..."
         sqlite3 "$USAGE_DB" <<EOF
-CREATE TABLE ip_usage (
+CREATE TABLE IF NOT EXISTS ip_usage (
     ip TEXT,
     timestamp INTEGER,
     bytes_up INTEGER,
@@ -145,18 +146,52 @@ CREATE TABLE ip_usage (
     PRIMARY KEY (ip, timestamp)
 );
 
-CREATE TABLE daily_usage (
+CREATE TABLE IF NOT EXISTS daily_usage (
     ip TEXT,
     date TEXT,
-    total_bytes_up INTEGER,
-    total_bytes_down INTEGER,
+    total_bytes_up INTEGER DEFAULT 0,
+    total_bytes_down INTEGER DEFAULT 0,
     PRIMARY KEY (ip, date)
 );
 
-CREATE INDEX idx_timestamp ON ip_usage(timestamp);
-CREATE INDEX idx_ip ON ip_usage(ip);
+CREATE INDEX IF NOT EXISTS idx_timestamp ON ip_usage(timestamp);
+CREATE INDEX IF NOT EXISTS idx_ip ON ip_usage(ip);
+CREATE INDEX IF NOT EXISTS idx_daily_date ON daily_usage(date);
+EOF
+    else
+        # Verificar y crear tablas si no existen en una base de datos existente
+        sqlite3 "$USAGE_DB" <<EOF
+CREATE TABLE IF NOT EXISTS ip_usage (
+    ip TEXT,
+    timestamp INTEGER,
+    bytes_up INTEGER,
+    bytes_down INTEGER,
+    PRIMARY KEY (ip, timestamp)
+);
+
+CREATE TABLE IF NOT EXISTS daily_usage (
+    ip TEXT,
+    date TEXT,
+    total_bytes_up INTEGER DEFAULT 0,
+    total_bytes_down INTEGER DEFAULT 0,
+    PRIMARY KEY (ip, date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_timestamp ON ip_usage(timestamp);
+CREATE INDEX IF NOT EXISTS idx_ip ON ip_usage(ip);
+CREATE INDEX IF NOT EXISTS idx_daily_date ON daily_usage(date);
 EOF
     fi
+
+    # Verificar que las tablas se crearon correctamente
+    if ! sqlite3 "$USAGE_DB" ".tables" | grep -q "daily_usage"; then
+        echo "Error: No se pudo crear la tabla daily_usage"
+        return 1
+    fi
+
+    # Establecer los permisos correctos
+    chmod 644 "$USAGE_DB"
+    echo "Sistema de seguimiento inicializado correctamente"
 }
 
 # Función para convertir bytes a unidad legible
