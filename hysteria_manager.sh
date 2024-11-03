@@ -531,36 +531,65 @@ change_passwords() {
 
 # Función mejorada para desinstalar
 uninstall_hysteria() {
-    echo -e "${YELLOW}¿Está seguro de que desea desinstalar Hysteria? (s/n)${NC}"
-    read -r confirm
-    if [ "$confirm" != "s" ]; then
-        return
-    fi
+    echo -e "${YELLOW}¿Qué desea desinstalar?${NC}"
+    echo -e "1. Todo (servicio y archivos de Hysteria)"
+    echo -e "2. Solo el manager (conservar servicio de Hysteria)"
+    read -r choice
 
-    echo -e "${YELLOW}¿Desea guardar una copia de la configuración? (s/n)${NC}"
-    read -r backup
-    if [ "$backup" = "s" ]; then
-        backup_config
-    fi
+    case $choice in
+        1)
+            echo -e "${YELLOW}¿Está seguro de que desea desinstalar Hysteria completamente? (s/n)${NC}"
+            read -r confirm
+            if [ "$confirm" != "s" ]; then
+                return
+            fi
 
-    systemctl stop hysteria
-    systemctl disable hysteria
+            echo -e "${YELLOW}¿Desea guardar una copia de la configuración? (s/n)${NC}"
+            read -r backup
+            if [ "$backup" = "s" ]; then
+                backup_config
+            fi
 
-    rm -f /usr/local/bin/hysteria
-    rm -rf /etc/hysteria
-    rm -f /etc/systemd/system/hysteria.service
+            systemctl stop hysteria
+            systemctl disable hysteria
 
-    # Limpiar reglas de firewall
-    if command -v ufw &> /dev/null; then
-        ufw delete allow "$PORT"/udp
-    elif command -v firewall-cmd &> /dev/null; then
-        firewall-cmd --permanent --remove-port="$PORT"/udp
-        firewall-cmd --reload
-    fi
+            rm -f /usr/local/bin/hysteria
+            rm -rf /etc/hysteria
+            rm -f /etc/systemd/system/hysteria.service
+            rm -f "$HOME/.local/bin/hysteria_manager.sh"
 
-    systemctl daemon-reload
-    echo -e "${GREEN}Hysteria ha sido desinstalado.${NC}"
-    log_message "Hysteria desinstalado"
+            # Limpiar reglas de firewall
+            if command -v ufw &> /dev/null; then
+                ufw delete allow "$PORT"/udp
+            elif command -v firewall-cmd &> /dev/null; then
+                firewall-cmd --permanent --remove-port="$PORT"/udp
+                firewall-cmd --reload
+            fi
+
+            systemctl daemon-reload
+            echo -e "${GREEN}Hysteria ha sido desinstalado completamente.${NC}"
+            log_message "Hysteria desinstalado completamente"
+            ;;
+            
+        2)
+            echo -e "${YELLOW}¿Está seguro de que desea desinstalar solo el manager? (s/n)${NC}"
+            read -r confirm
+            if [ "$confirm" != "s" ]; then
+                return
+            fi
+
+            # Solo eliminar el script del manager
+            rm -f "$HOME/.local/bin/hysteria_manager.sh"
+            echo -e "${GREEN}El manager ha sido desinstalado. El servicio de Hysteria sigue funcionando.${NC}"
+            log_message "Manager desinstalado, servicio de Hysteria conservado"
+            exit 0
+            ;;
+            
+        *)
+            echo -e "${RED}Opción inválida${NC}"
+            return
+            ;;
+    esac
 }
 
 # Función para mostrar logs
