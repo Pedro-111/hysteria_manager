@@ -534,6 +534,7 @@ uninstall_hysteria() {
     echo -e "${YELLOW}¿Qué desea desinstalar?${NC}"
     echo -e "1. Todo (servicio y archivos de Hysteria)"
     echo -e "2. Solo el manager (conservar servicio de Hysteria)"
+    echo -e "0. Cancelar"
     read -r choice
 
     case $choice in
@@ -584,13 +585,19 @@ uninstall_hysteria() {
             log_message "Manager desinstalado, servicio de Hysteria conservado"
             exit 0
             ;;
-            
+        
+        0)
+            echo -e "${GREEN}Cancelando la desinstalación.${NC}"
+            exit 0
+            ;;
+
         *)
             echo -e "${RED}Opción inválida${NC}"
             return
             ;;
     esac
 }
+
 
 # Función para mostrar logs
 show_logs() {
