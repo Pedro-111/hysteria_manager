@@ -588,7 +588,7 @@ uninstall_hysteria() {
         
         0)
             echo -e "${GREEN}Cancelando la desinstalación.${NC}"
-            exit 0
+            return
             ;;
 
         *)
