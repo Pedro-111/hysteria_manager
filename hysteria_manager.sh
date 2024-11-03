@@ -465,8 +465,7 @@ After=hysteria.service
 [Service]
 Type=simple
 ExecStart=/bin/bash -c 'source $HOME/.local/bin/hysteria_manager && start_usage_monitoring'
-Restart=always
-RestartSec=3
+Restart=on-failure
 
 [Install]
 WantedBy=multi-user.target
