@@ -464,7 +464,7 @@ After=hysteria.service
 
 [Service]
 Type=simple
-ExecStart=/bin/bash -c 'source $HOME/.local/bin/hysteria_manager.sh && start_usage_monitoring'
+ExecStart=/bin/bash -c 'source $HOME/.local/bin/hysteria_manager && start_usage_monitoring'
 Restart=always
 RestartSec=3
 
