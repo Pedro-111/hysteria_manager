@@ -260,12 +260,35 @@ EOF
 )
     echo "$result"
 }
-
+# Nueva función para controlar el monitoreo
+toggle_monitoring() {
+    if systemctl is-active --quiet hysteria-monitor; then
+        echo -e "${YELLOW}Deteniendo monitoreo de uso...${NC}"
+        systemctl stop hysteria-monitor
+        echo -e "${GREEN}Monitoreo detenido.${NC}"
+    else
+        echo -e "${YELLOW}Iniciando monitoreo de uso...${NC}"
+        init_usage_tracking
+        systemctl start hysteria-monitor
+        echo -e "${GREEN}Monitoreo iniciado.${NC}"
+    fi
+}
 # Función para mostrar el historial de consumo
 show_usage_history() {
+    # Verificar si la base de datos existe y está inicializada
+    if [ ! -f "$USAGE_DB" ]; then
+        echo -e "${YELLOW}Inicializando sistema de seguimiento...${NC}"
+        init_usage_tracking
+    fi
     echo -e "${YELLOW}=== Historial de Consumo (Últimos 5 días) ===${NC}"
     echo -e "${BLUE}Fecha actual: $(date '+%Y-%m-%d %H:%M:%S')${NC}\n"
-
+    # Verificar si hay datos en la tabla
+    local count=$(sqlite3 "$USAGE_DB" "SELECT COUNT(*) FROM daily_usage;")
+    if [ "$count" -eq 0 ]; then
+        echo -e "${YELLOW}No hay datos de uso registrados aún.${NC}"
+        echo -e "${YELLOW}El sistema está configurado y comenzará a recopilar datos.${NC}"
+        return
+    fi
     # Obtener y mostrar estadísticas
     echo -e "╔════════════════╦════════════╦════════════════╦════════════════╦════════════════╗"
     echo -e "║      IP        ║   Fecha    ║    Subida      ║    Bajada      ║     Total      ║"
@@ -433,6 +456,28 @@ RestartSec=3
 [Install]
 WantedBy=multi-user.target
 EOF
+    # Crear servicio para el monitor de uso
+    cat > /etc/systemd/system/hysteria-monitor.service <<EOF
+[Unit]
+Description=Hysteria Usage Monitor
+After=hysteria.service
+
+[Service]
+Type=simple
+ExecStart=/bin/bash -c 'source /path/to/hysteria_manager.sh && start_usage_monitoring'
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Inicializar el sistema de seguimiento
+    init_usage_tracking
+
+    # Habilitar e iniciar ambos servicios
+    systemctl enable hysteria hysteria-monitor
+    systemctl start hysteria hysteria-monitor
     # Habilitar e iniciar el servicio
     systemctl enable hysteria
     systemctl start hysteria
@@ -880,6 +925,7 @@ show_menu() {
     echo -e "${BLUE}8.${NC} Monitor de usuarios en tiempo real"
     echo -e "${BLUE}9.${NC} Actualizar manager"
     echo -e "${BLUE}10.${NC} Ver historial de consumo"
+    echo -e "${BLUE}11.${NC} Iniciar/Detener monitoreo de uso"
     echo -e "${BLUE}0.${NC} Salir"
     echo -e "${YELLOW}===================${NC}"
 }
@@ -919,6 +965,9 @@ while true; do
             ;;
         10)
             show_usage_history
+            ;;
+        11)
+            toggle_monitoring
             ;;
         0)
             echo -e "${GREEN}Saliendo...${NC}"
