@@ -293,9 +293,9 @@ show_config() {
         # Generar códigos QR
         echo -e "\n${BLUE}Códigos QR:${NC}"
         echo -e "${YELLOW}NekoBox QR Code:${NC}"
-        qrencode -t ANSIUTF8 "$nekobox_import"
+        qrencode -t ANSI "$nekobox_import"
         echo -e "${YELLOW}Clash QR Code:${NC}"
-        qrencode -t ANSIUTF8 "$clash_import"
+        qrencode -t ANSI "$clash_import"
     else
         echo -e "\n${RED}No se pudieron generar las cadenas de importación debido a valores faltantes.${NC}"
     fi
