@@ -47,13 +47,14 @@ generate_password() {
 check_dependencies() {
     echo -e "${YELLOW}Verificando dependencias...${NC}"
     local deps=(
-        "curl:curl" 
-        "wget:wget" 
-        "openssl:openssl" 
+        "curl:curl"
+        "wget:wget"
+        "openssl:openssl"
         "jq:jq"
         "bc:bc"
         "iptables:iptables"
         "netstat:net-tools"
+        "qrencode:qrencode"  # Agregar qrencode a las dependencias
     )
     local missing=()
 
@@ -67,7 +68,7 @@ check_dependencies() {
 
     if [ ${#missing[@]} -ne 0 ]; then
         echo -e "${YELLOW}Instalando dependencias faltantes: ${missing[*]}${NC}"
-        
+
         # Actualizar lista de paquetes
         if ! apt-get update; then
             echo -e "${RED}Error al actualizar la lista de paquetes. Intentando continuar...${NC}"
@@ -104,7 +105,6 @@ check_dependencies() {
     echo -e "${GREEN}Todas las dependencias están instaladas y funcionando correctamente${NC}"
     return 0
 }
-
 
 # Función para obtener IP
 get_ip() {
@@ -144,7 +144,7 @@ install_hysteria() {
         backup_config
     fi
     echo -e "${YELLOW}Instalando Hysteria...${NC}"
-    
+
     # Descargar e instalar Hysteria
     wget https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64
     chmod +x hysteria-linux-amd64
@@ -193,13 +193,14 @@ RestartSec=3
 [Install]
 WantedBy=multi-user.target
 EOF
-   
+
     # Habilitar e iniciar el servicio
     systemctl enable hysteria
     systemctl start hysteria
     echo -e "${GREEN}Hysteria instalado y configurado exitosamente.${NC}"
     show_config
 }
+
 # Función para verificar e instalar jq
 check_jq() {
     if ! command -v jq >/dev/null 2>&1; then
@@ -228,12 +229,12 @@ show_config() {
         echo -e "${RED}Hysteria no está instalado o configurado.${NC}"
         return
     fi
-    
+
     # Verificar e instalar jq si es necesario
     check_jq
-    
+
     echo -e "${YELLOW}Obteniendo configuración...${NC}"
-    
+
     # Intentar obtener valores usando jq con manejo mejorado de la estructura
     if command -v jq >/dev/null 2>&1; then
         local port=$(jq -r '.listen' "$CONFIG_FILE" 2>/dev/null | grep -oP '\d+' || echo "Error")
@@ -250,24 +251,24 @@ show_config() {
         local obfs_password=$(grep -o '"password":"[^"]*"' "$CONFIG_FILE" | head -1 | cut -d'"' -f4 || echo "Error")
         local auth_password=$(grep -o '"password":"[^"]*"' "$CONFIG_FILE" | tail -1 | cut -d'"' -f4 || echo "Error")
     fi
-    
+
     # Obtener IPs
     echo -e "${YELLOW}Obteniendo IPs...${NC}"
     local public_ip
     local private_ip
-    
+
     # Intentar múltiples métodos para obtener IP pública
-    public_ip=$(curl -s https://api.ipify.org 2>/dev/null || 
-                wget -qO- https://api.ipify.org 2>/dev/null || 
-                curl -s https://ipinfo.io/ip 2>/dev/null || 
-                curl -s https://icanhazip.com 2>/dev/null || 
+    public_ip=$(curl -s https://api.ipify.org 2>/dev/null ||
+                wget -qO- https://api.ipify.org 2>/dev/null ||
+                curl -s https://ipinfo.io/ip 2>/dev/null ||
+                curl -s https://icanhazip.com 2>/dev/null ||
                 echo "No disponible")
-    
+
     # Obtener IP privada
-    private_ip=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1' | head -n 1 || 
-                 hostname -I | awk '{print $1}' || 
+    private_ip=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1' | head -n 1 ||
+                 hostname -I | awk '{print $1}' ||
                  echo "No disponible")
-    
+
     # Mostrar la configuración
     echo -e "\n${YELLOW}Configuración de Hysteria:${NC}"
     echo -e "${BLUE}IP pública:${NC} $public_ip"
@@ -277,21 +278,28 @@ show_config() {
     echo -e "${BLUE}Contraseña de autenticación:${NC} $auth_password"
     echo -e "${BLUE}Velocidad de subida:${NC} $upload_mbps Mbps"
     echo -e "${BLUE}Velocidad de bajada:${NC} $download_mbps Mbps"
-    
+
     # Generar y mostrar cadenas de importación solo si tenemos todos los valores necesarios
-    if [ "$port" != "Error" ] && [ "$public_ip" != "No disponible" ] && 
+    if [ "$port" != "Error" ] && [ "$public_ip" != "No disponible" ] &&
        [ "$auth_password" != "Error" ] && [ "$obfs_password" != "Error" ]; then
-        
+
         local nekobox_import="hy2://${auth_password}@${public_ip}:${port}/?insecure=1&obfs=salamander&obfs-password=${obfs_password}#Hysteria_Server"
         local clash_import="- name: Hysteria_Server\n  type: hysteria\n  server: ${public_ip}\n  port: ${port}\n  auth-str: ${auth_password}\n  obfs: salamander\n  obfs-password: ${obfs_password}\n  up: ${upload_mbps}\n  down: ${download_mbps}"
-        
+
         echo -e "\n${BLUE}Cadenas de importación:${NC}"
         echo -e "${YELLOW}NekoBox:${NC}\n$nekobox_import"
         echo -e "\n${YELLOW}Clash:${NC}\n$clash_import"
+
+        # Generar códigos QR
+        echo -e "\n${BLUE}Códigos QR:${NC}"
+        echo -e "${YELLOW}NekoBox QR Code:${NC}"
+        qrencode -t ANSIUTF8 "$nekobox_import"
+        echo -e "${YELLOW}Clash QR Code:${NC}"
+        qrencode -t ANSIUTF8 "$clash_import"
     else
         echo -e "\n${RED}No se pudieron generar las cadenas de importación debido a valores faltantes.${NC}"
     fi
-    
+
     # Mostrar estado del servicio
     echo -e "\n${BLUE}Estado del servicio:${NC}"
     if systemctl status hysteria >/dev/null 2>&1; then
@@ -299,7 +307,7 @@ show_config() {
     else
         echo -e "${RED}Servicio no encontrado${NC}"
     fi
-    
+
     # Mostrar estadísticas de conexión
     echo -e "\n${BLUE}Estadísticas de conexión:${NC}"
     if command -v netstat >/dev/null 2>&1; then
@@ -312,6 +320,7 @@ show_config() {
         echo -e "${RED}No se pueden obtener estadísticas de conexión (netstat/ss no disponible)${NC}"
     fi
 }
+
 # Función para verificar y instalar dependencias del monitor
 check_monitor_dependencies() {
     echo -e "${YELLOW}Verificando dependencias del monitor...${NC}"
@@ -341,7 +350,7 @@ check_monitor_dependencies() {
     if [ ${#missing[@]} -ne 0 ]; then
         echo -e "${YELLOW}Faltan las siguientes herramientas: ${missing[*]}${NC}"
         echo -e "${BLUE}Intentando instalar dependencias...${NC}"
-        
+
         if command -v apt-get >/dev/null 2>&1; then
             apt-get update
             apt-get install -y "${packages[@]}"
@@ -351,7 +360,7 @@ check_monitor_dependencies() {
             echo -e "${RED}No se pudo determinar el gestor de paquetes. Por favor, instale manualmente: ${packages[*]}${NC}"
             return 1
         fi
-        
+
         # Verificar si la instalación fue exitosa
         local failed=()
         for dep in "${missing[@]}"; do
@@ -359,16 +368,17 @@ check_monitor_dependencies() {
                 failed+=("$dep")
             fi
         done
-        
+
         if [ ${#failed[@]} -ne 0 ]; then
             echo -e "${RED}No se pudieron instalar todas las dependencias. Faltantes: ${failed[*]}${NC}"
             return 1
         fi
     fi
-    
+
     echo -e "${GREEN}Todas las dependencias están instaladas.${NC}"
     return 0
 }
+
 monitor_users() {
     # Verificar dependencias
     if ! command -v journalctl >/dev/null 2>&1; then
@@ -383,15 +393,15 @@ monitor_users() {
     get_system_resources() {
         # CPU
         local cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}')
-        
+
         # Memoria
         local mem_total=$(free -m | awk 'NR==2{print $2}')
         local mem_used=$(free -m | awk 'NR==2{print $3}')
         local mem_percent=$(awk "BEGIN {printf \"%.1f\", $mem_used*100/$mem_total}")
-        
+
         # Disco
         local disk_usage=$(df -h / | awk 'NR==2{print $5}')
-        
+
         # Si hysteria está en ejecución, obtener su PID y recursos específicos
         local hysteria_resources=""
         if pid=$(pgrep -f "hysteria" | head -1); then
@@ -402,7 +412,7 @@ monitor_users() {
         echo -e "├─ CPU Sistema: ${GREEN}${cpu_usage}%${NC}"
         echo -e "├─ RAM: ${GREEN}${mem_used}MB/${mem_total}MB (${mem_percent}%)${NC}"
         echo -e "└─ Disco: ${GREEN}${disk_usage}${NC}"
-        
+
         if [ ! -z "$hysteria_resources" ]; then
             local hysteria_cpu=$(echo $hysteria_resources | awk '{print $1}')
             local hysteria_mem=$(echo $hysteria_resources | awk '{print $2}')
@@ -419,14 +429,14 @@ monitor_users() {
         echo -e "${BLUE}Monitoreando conexiones en tiempo real...${NC}"
         echo -e "${PURPLE}Fecha y hora: ${NC}$(date '+%Y-%m-%d %H:%M:%S')"
         echo -e "${YELLOW}Presione 0 para salir${NC}\n"
-        
+
         if systemctl is-active --quiet hysteria; then
             echo -e "${GREEN}Estado del servicio: Activo${NC}\n"
         else
             echo -e "${RED}Estado del servicio: Inactivo${NC}\n"
             return 1
         fi
-        
+
         # Mostrar información de recursos
         get_system_resources
     }
@@ -450,27 +460,27 @@ monitor_users() {
         echo "╔════════════════════╦═══════════════╦══════════════════╗"
         echo "║ IP Cliente         ║ Puerto        ║ Tiempo Conectado ║"
         echo "╠════════════════════╬═══════════════╬══════════════════╣"
-        
+
         local now=$(date +%s)
         for addr in "${!active_connections[@]}"; do
             local ip=$(echo "$addr" | cut -d: -f1)
             local port=$(echo "$addr" | cut -d: -f2)
             local timestamp="${active_connections[$addr]}"
-            
+
             local conn_time=$(date -d "$timestamp" +%s)
             local duration=$((now - conn_time))
             local duration_str=$(printf '%02d:%02d:%02d' $((duration/3600)) $((duration%3600/60)) $((duration%60)))
-            
+
             printf "║ %-18s ║ %-13s ║ %-16s ║\n" "$ip" "$port" "$duration_str"
         done
-        
+
         echo "╚════════════════════╩═══════════════╩══════════════════╝"
         echo -e "\n${GREEN}Total de conexiones activas: ${#active_connections[@]}${NC}"
     }
 
     # Inicializar el monitor
     show_header
-    
+
     # Cargar conexiones existentes iniciales
     journalctl -u hysteria -n 1000 --no-pager | while read -r line; do
         process_log_line "$line"
@@ -503,6 +513,7 @@ monitor_users() {
     wait $LOGGER_PID 2>/dev/null
     return 0
 }
+
 change_passwords() {
     if [ ! -f "$CONFIG_FILE" ]; then
         echo -e "${RED}Hysteria no está instalado o configurado.${NC}"
@@ -571,7 +582,7 @@ uninstall_hysteria() {
             echo -e "${GREEN}Hysteria ha sido desinstalado completamente.${NC}"
             log_message "Hysteria desinstalado completamente"
             ;;
-            
+
         2)
             echo -e "${YELLOW}¿Está seguro de que desea desinstalar solo el manager? (s/n)${NC}"
             read -r confirm
@@ -585,7 +596,7 @@ uninstall_hysteria() {
             log_message "Manager desinstalado, servicio de Hysteria conservado"
             exit 0
             ;;
-        
+
         0)
             echo -e "${GREEN}Cancelando la desinstalación.${NC}"
             return
@@ -598,7 +609,6 @@ uninstall_hysteria() {
     esac
 }
 
-
 # Función para mostrar logs
 show_logs() {
     if [ -f "$LOG_FILE" ]; then
@@ -608,54 +618,55 @@ show_logs() {
         echo -e "${RED}No se encontró el archivo de log.${NC}"
     fi
 }
+
 update_manager() {
     echo -e "${YELLOW}Verificando actualización del manager...${NC}"
-    
+
     # Crear directorio temporal
     TMP_DIR=$(mktemp -d)
     cd "$TMP_DIR" || exit 1
-    
+
     # Intentar descargar el nuevo script
     if ! curl -sL "https://raw.githubusercontent.com/Pedro-111/hysteria_manager/develop/hysteria_manager.sh" -o "hysteria_manager.sh.new"; then
         echo -e "${RED}Error al descargar la actualización.${NC}"
         rm -rf "$TMP_DIR"
         return 1
     fi
-    
+
     # Verificar si el archivo se descargó correctamente
     if [ ! -s "hysteria_manager.sh.new" ]; then
         echo -e "${RED}El archivo descargado está vacío.${NC}"
         rm -rf "$TMP_DIR"
         return 1
     fi
-    
+
     # Obtener la ruta del script actual
     CURRENT_SCRIPT=$(realpath "$0")
-    
+
     # Comparar versiones (puedes implementar una comparación más sofisticada si el script tiene número de versión)
     if diff -q "hysteria_manager.sh.new" "$CURRENT_SCRIPT" >/dev/null; then
         echo -e "${GREEN}El manager ya está actualizado a la última versión.${NC}"
         rm -rf "$TMP_DIR"
         return 0
     fi
-    
+
     # Hacer backup del script actual
     cp "$CURRENT_SCRIPT" "$CURRENT_SCRIPT.backup"
-    
+
     # Reemplazar el script actual con la nueva versión
     mv "hysteria_manager.sh.new" "$CURRENT_SCRIPT"
     chmod +x "$CURRENT_SCRIPT"
-    
+
     echo -e "${GREEN}El manager se ha actualizado exitosamente.${NC}"
     echo -e "${YELLOW}Se ha creado un backup en: ${CURRENT_SCRIPT}.backup${NC}"
     echo -e "${BLUE}Por favor, reinicie el script para aplicar los cambios.${NC}"
-    
+
     # Limpiar
     rm -rf "$TMP_DIR"
-    
+
     # Registrar la actualización
     log_message "Manager actualizado exitosamente"
-    
+
     # Preguntar si desea reiniciar el script
     echo -e "${YELLOW}¿Desea reiniciar el script ahora? (s/n)${NC}"
     read -r restart
@@ -664,6 +675,7 @@ update_manager() {
         exec "$CURRENT_SCRIPT"
     fi
 }
+
 # Menú principal mejorado
 show_menu() {
     echo -e "\n${YELLOW}=== Menú de Hysteria ===${NC}"
