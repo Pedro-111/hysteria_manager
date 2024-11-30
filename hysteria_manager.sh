@@ -295,7 +295,8 @@ show_config() {
         echo -e "${YELLOW}NekoBox QR Code:${NC}"
         qrencode -t ANSI "$nekobox_import"
         echo -e "${YELLOW}Clash QR Code:${NC}"
-        qrencode -t ANSI "$clash_import"
+        # Convert the multi-line Clash config to a single-line string for QR code
+        qrencode -t ANSI "$(echo "$clash_import" | tr '\n' ' ')"
     else
         echo -e "\n${RED}No se pudieron generar las cadenas de importación debido a valores faltantes.${NC}"
     fi
